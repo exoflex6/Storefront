@@ -10,7 +10,7 @@ const defaults = () => ({
     seedHash: null,
     wishlist: [],
     // Last offer sets we alerted on, so restarts don't re-send the same DM.
-    lastAlerted: { daily: null, nightMarket: null },
+    lastAlerted: { daily: null, accessories: null, nightMarket: null },
     authDeadNotified: false,
 });
 
@@ -20,7 +20,8 @@ export class Store {
         fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
         this.state = defaults();
         if (fs.existsSync(this.file)) {
-            this.state = { ...defaults(), ...JSON.parse(fs.readFileSync(this.file, "utf8")) };
+            const saved = JSON.parse(fs.readFileSync(this.file, "utf8"));
+            this.state = { ...defaults(), ...saved, lastAlerted: { ...defaults().lastAlerted, ...saved.lastAlerted } };
         }
     }
 

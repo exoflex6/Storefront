@@ -1,11 +1,10 @@
 import {
     ApplicationIntegrationType,
-    EmbedBuilder,
     InteractionContextType,
     MessageFlags,
     SlashCommandBuilder,
 } from "discord.js";
-import { accessoryEmbeds, bundleEmbeds, dailyEmbeds, nightMarketEmbeds } from "./embeds.js";
+import { accessoryEmbeds, bundleEmbeds, dailyEmbeds, nightMarketEmbeds, wishlistItemEmbed } from "./embeds.js";
 import { describeError } from "../errors.js";
 
 // Every command must be installable on both guilds and user accounts and usable
@@ -18,6 +17,8 @@ const shareOption = (builder) => builder.addBooleanOption((o) => o
     .setName("share")
     .setDescription("Post visibly instead of only to you (default: only you)"));
 
+const KIND_CHOICES = { skin: "Skin", buddy: "Gun buddy", spray: "Spray", card: "Player card", title: "Player title", flex: "Flex" };
+
 const shopCommand = (name, description) => everywhere(shareOption(new SlashCommandBuilder().setName(name).setDescription(description)));
 
 export const commandDefinitions = [
@@ -27,11 +28,13 @@ export const commandDefinitions = [
     shopCommand("bundle", "The current featured bundle(s)"),
     everywhere(new SlashCommandBuilder()
         .setName("wishlist")
-        .setDescription("Skins to alert you about")
-        .addSubcommand((s) => s.setName("add").setDescription("Add a skin to your wishlist")
-            .addStringOption((o) => o.setName("skin").setDescription("Skin name").setRequired(true).setAutocomplete(true)))
-        .addSubcommand((s) => s.setName("remove").setDescription("Remove a skin from your wishlist")
-            .addStringOption((o) => o.setName("skin").setDescription("Skin name").setRequired(true).setAutocomplete(true)))
+        .setDescription("Skins and accessories to alert you about")
+        .addSubcommand((s) => s.setName("add").setDescription("Add a skin or accessory to your wishlist")
+            .addStringOption((o) => o.setName("item").setDescription("Item name").setRequired(true).setAutocomplete(true))
+            .addStringOption((o) => o.setName("type").setDescription("Only suggest this kind of item")
+                .addChoices(...Object.entries(KIND_CHOICES).map(([value, name]) => ({ name, value })))))
+        .addSubcommand((s) => s.setName("remove").setDescription("Remove an item from your wishlist")
+            .addStringOption((o) => o.setName("item").setDescription("Item name").setRequired(true).setAutocomplete(true)))
         .addSubcommand((s) => s.setName("list").setDescription("Show your wishlist"))),
     everywhere(new SlashCommandBuilder()
         .setName("status")
@@ -44,7 +47,7 @@ export const commandDefinitions = [
 export const createHandlers = ({ store, shops, catalog, emojis, ownerId }) => {
     const views = {
         shop: (shop) => dailyEmbeds(shop, emojis, { wishlist: store.state.wishlist }),
-        accessories: (shop) => accessoryEmbeds(shop, emojis),
+        accessories: (shop) => accessoryEmbeds(shop, emojis, { wishlist: store.state.wishlist }),
         nightmarket: (shop) => nightMarketEmbeds(shop, emojis, { wishlist: store.state.wishlist }),
         bundle: (shop) => bundleEmbeds(shop, emojis),
     };
@@ -60,35 +63,42 @@ export const createHandlers = ({ store, shops, catalog, emojis, ownerId }) => {
         }
     };
 
+    const ephemeral = { flags: MessageFlags.Ephemeral };
+
     const handleWishlist = async (interaction) => {
         const sub = interaction.options.getSubcommand();
         await catalog.ensureLoaded();
 
         if (sub === "list") {
-            const names = store.state.wishlist.map((uuid) => catalog.skins.get(uuid)?.name ?? `Unknown skin (${uuid.slice(0, 8)})`);
-            const embed = new EmbedBuilder()
-                .setTitle("Wishlist")
-                .setDescription(names.length ? names.map((n) => `• ${n}`).join("\n").slice(0, 4096) : "Empty - add skins with `/wishlist add`.")
-                .setColor(0xff4655);
-            return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+            const items = store.state.wishlist.map((uuid) => catalog.item(uuid));
+            if (!items.length) return interaction.reply({ content: "Your wishlist is empty - add items with `/wishlist add`.", ...ephemeral });
+            // Discord caps a message at 10 embeds, so longer lists go out as follow-ups.
+            const pages = [];
+            for (let i = 0; i < items.length; i += 10) pages.push(items.slice(i, i + 10).map((item) => wishlistItemEmbed(item, emojis)));
+            await interaction.reply({ content: `**Wishlist** (${items.length})`, embeds: pages[0], ...ephemeral });
+            for (const embeds of pages.slice(1)) await interaction.followUp({ embeds, ...ephemeral });
+            return;
         }
 
-        const value = interaction.options.getString("skin", true);
+        const value = interaction.options.getString("item", true);
+        const kind = interaction.options.getString("type");
         // Autocomplete sends the UUID; fall back to an exact name match if the user typed freely.
-        const skin = catalog.skins.get(value)
-            ?? [...catalog.skins.values()].find((s) => s.name.toLowerCase() === value.trim().toLowerCase());
-        if (!skin) return interaction.reply({ content: `No skin matching "${value}". Pick one from the suggestions.`, flags: MessageFlags.Ephemeral });
+        const pool = sub === "remove" ? store.state.wishlist.map((uuid) => catalog.item(uuid)) : catalog.wishlistable;
+        const item = pool.find((i) => i.uuid === value)
+            ?? pool.find((i) => (!kind || i.kind === kind) && i.name.toLowerCase() === value.trim().toLowerCase());
+        if (!item) return interaction.reply({ content: `Nothing matching "${value}". Pick one from the suggestions.`, ...ephemeral });
 
         if (sub === "add") {
-            if (store.state.wishlist.includes(skin.uuid)) {
-                return interaction.reply({ content: `**${skin.name}** is already on your wishlist.`, flags: MessageFlags.Ephemeral });
+            if (store.state.wishlist.includes(item.uuid)) {
+                return interaction.reply({ content: `**${item.name}** is already on your wishlist.`, ...ephemeral });
             }
-            store.update((s) => { s.wishlist.push(skin.uuid); });
-            return interaction.reply({ content: `Added **${skin.name}**. You'll get a DM when it shows up.`, flags: MessageFlags.Ephemeral });
+            store.update((s) => { s.wishlist.push(item.uuid); });
+            const embed = wishlistItemEmbed(item, emojis, { large: true, note: "You'll get a DM when it shows up in your shop." });
+            return interaction.reply({ content: "Added to your wishlist:", embeds: [embed], ...ephemeral });
         }
 
-        store.update((s) => { s.wishlist = s.wishlist.filter((uuid) => uuid !== skin.uuid); });
-        return interaction.reply({ content: `Removed **${skin.name}**.`, flags: MessageFlags.Ephemeral });
+        store.update((s) => { s.wishlist = s.wishlist.filter((uuid) => uuid !== item.uuid); });
+        return interaction.reply({ content: "Removed from your wishlist:", embeds: [wishlistItemEmbed(item, emojis)], ...ephemeral });
     };
 
     const handleStatus = async (interaction) => {
@@ -104,7 +114,7 @@ export const createHandlers = ({ store, shops, catalog, emojis, ownerId }) => {
         } catch (err) {
             lines.push(`❌ ${describeError(err)}`);
         }
-        lines.push(`Wishlist: ${store.state.wishlist.length} skin(s) · Daily DM: ${shops.dailyDm ? "on" : "off"}`);
+        lines.push(`Wishlist: ${store.state.wishlist.length} item(s) · Daily DM: ${shops.dailyDm ? "on" : "off"}`);
         await interaction.editReply({ content: lines.join("\n") });
     };
 
@@ -113,10 +123,13 @@ export const createHandlers = ({ store, shops, catalog, emojis, ownerId }) => {
         const query = interaction.options.getFocused();
         const sub = interaction.options.getSubcommand();
         const q = query.trim().toLowerCase();
-        const skins = sub === "remove"
-            ? store.state.wishlist.map((uuid) => catalog.skins.get(uuid)).filter((s) => s && s.name.toLowerCase().includes(q))
-            : catalog.searchSkins(query);
-        await interaction.respond(skins.slice(0, 25).map((s) => ({ name: s.name.slice(0, 100), value: s.uuid })));
+        const items = sub === "remove"
+            ? store.state.wishlist.map((uuid) => catalog.item(uuid)).filter((i) => i.name.toLowerCase().includes(q))
+            : catalog.searchWishlistable(query, { kind: interaction.options.getString("type") });
+        await interaction.respond(items.slice(0, 25).map((i) => ({
+            name: `${i.name} · ${KIND_CHOICES[i.kind] ?? "Item"}`.slice(0, 100),
+            value: i.uuid,
+        })));
     };
 
     return async (interaction) => {

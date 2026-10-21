@@ -18,7 +18,7 @@ export const parseStorefront = (raw, catalog, now = Date.now()) => {
             const itemId = firstReward(offer)?.ItemID ?? offer.OfferID;
             return {
                 ...catalog.item(itemId),
-                skinUuid: catalog.skinUuidFor(itemId),
+                key: catalog.wishlistKeyFor(itemId),
                 price: offer.Cost?.[CURRENCY.VP] ?? null,
             };
         }),
@@ -29,8 +29,10 @@ export const parseStorefront = (raw, catalog, now = Date.now()) => {
         resetsAt: at(accessoryStore.AccessoryStoreRemainingDurationInSeconds),
         items: (accessoryStore.AccessoryStoreOffers ?? []).map(({ Offer }) => {
             const reward = firstReward(Offer);
+            const itemId = reward?.ItemID ?? Offer.OfferID;
             return {
-                ...catalog.item(reward?.ItemID ?? Offer.OfferID),
+                ...catalog.item(itemId),
+                key: catalog.wishlistKeyFor(itemId),
                 quantity: reward?.Quantity ?? 1,
                 price: Offer.Cost?.[CURRENCY.KC] ?? null,
             };
@@ -44,7 +46,7 @@ export const parseStorefront = (raw, catalog, now = Date.now()) => {
             const itemId = firstReward(bonus.Offer)?.ItemID;
             return {
                 ...catalog.item(itemId),
-                skinUuid: catalog.skinUuidFor(itemId),
+                key: catalog.wishlistKeyFor(itemId),
                 basePrice: bonus.Offer.Cost?.[CURRENCY.VP] ?? null,
                 price: bonus.DiscountCosts?.[CURRENCY.VP] ?? null,
                 discountPercent: bonus.DiscountPercent ?? 0,
@@ -80,12 +82,15 @@ export const parseStorefront = (raw, catalog, now = Date.now()) => {
 
 const sum = (items = [], key) => items.reduce((total, item) => total + (item[key] ?? 0), 0);
 
-/** Wishlisted skins present in the daily shop or night market. */
+/** Whether a parsed shop item is on the wishlist (keys are top-level item UUIDs). */
+export const isWishlisted = (item, wishlist) => Boolean(item.key) && wishlist.includes(item.key);
+
+/** Wishlisted items present in the daily shop, accessory store or night market. */
 export const findWishlistHits = (shop, wishlist) => {
-    const wanted = new Set(wishlist);
-    const match = (items) => items.filter((item) => item.skinUuid && wanted.has(item.skinUuid));
+    const match = (items) => items.filter((item) => isWishlisted(item, wishlist));
     return {
         daily: match(shop.daily.items),
+        accessories: match(shop.accessories.items),
         nightMarket: shop.nightMarket ? match(shop.nightMarket.items) : [],
     };
 };

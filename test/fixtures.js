@@ -4,6 +4,7 @@ import { CURRENCY } from "../src/content.js";
 export const SKIN_A = { skin: "skin-a", level: "skin-a-lvl1" };
 export const SKIN_B = { skin: "skin-b", level: "skin-b-lvl1" };
 export const SKIN_NM = { skin: "skin-nm", level: "skin-nm-lvl1" };
+export const BUDDY = { buddy: "buddy-1", level: "buddy-1-lvl1" };
 
 export const fakeCatalog = () => {
     const tier = { name: "Premium", rank: 2, color: 0xd1548d, icon: null };
@@ -13,15 +14,17 @@ export const fakeCatalog = () => {
         const entry = { uuid: skin, kind: "skin", name, icon: `https://img/${skin}.png`, tier };
         skins.set(skin, entry);
         items.set(skin, entry);
-        items.set(level, { ...entry, skinUuid: skin });
+        items.set(level, { ...entry, parentUuid: skin });
     }
-    items.set("buddy-1", { uuid: "buddy-1", kind: "buddy", name: "Lucky Buddy", icon: null });
+    const buddy = { uuid: BUDDY.buddy, kind: "buddy", name: "Lucky Buddy", icon: "https://img/buddy.png" };
+    items.set(BUDDY.buddy, buddy);
+    items.set(BUDDY.level, { ...buddy, parentUuid: BUDDY.buddy });
     return {
         items,
         skins,
         bundles: new Map([["bundle-asset", { uuid: "bundle-asset", name: "Prime 2.0", icon: "https://img/bundle.png" }]]),
         item(uuid) { return items.get(uuid) ?? { uuid, kind: "unknown", name: "Unknown", icon: null }; },
-        skinUuidFor(uuid) { const i = items.get(uuid); return i?.kind === "skin" ? (i.skinUuid ?? i.uuid) : null; },
+        wishlistKeyFor(uuid) { const i = items.get(uuid); return i ? (i.parentUuid ?? i.uuid) : null; },
     };
 };
 
@@ -42,7 +45,7 @@ export const storefront = ({ nightMarket = true } = {}) => ({
             CurrencyID: CURRENCY.VP,
             Items: [
                 { Item: { ItemTypeID: "t", ItemID: SKIN_A.level, Amount: 1 }, BasePrice: 2175, CurrencyID: CURRENCY.VP, DiscountPercent: 0.33, DiscountedPrice: 1450, IsPromoItem: false },
-                { Item: { ItemTypeID: "t", ItemID: "buddy-1", Amount: 1 }, BasePrice: 475, CurrencyID: CURRENCY.VP, DiscountPercent: 1, DiscountedPrice: 0, IsPromoItem: true },
+                { Item: { ItemTypeID: "t", ItemID: BUDDY.level, Amount: 1 }, BasePrice: 475, CurrencyID: CURRENCY.VP, DiscountPercent: 1, DiscountedPrice: 0, IsPromoItem: true },
             ],
             ItemOffers: null,
             TotalBaseCost: { [CURRENCY.VP]: 2650 },
@@ -60,7 +63,7 @@ export const storefront = ({ nightMarket = true } = {}) => ({
     },
     UpgradeCurrencyStore: { UpgradeCurrencyOffers: [] },
     AccessoryStore: {
-        AccessoryStoreOffers: [{ Offer: { ...offer("buddy-1", 3000, CURRENCY.KC) }, ContractID: "c" }],
+        AccessoryStoreOffers: [{ Offer: { ...offer(BUDDY.level, 3000, CURRENCY.KC) }, ContractID: "c" }],
         AccessoryStoreRemainingDurationInSeconds: 7200,
         StorefrontID: "s",
     },

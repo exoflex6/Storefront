@@ -1,4 +1,5 @@
 import { EmbedBuilder } from "discord.js";
+import { isWishlisted } from "../shop.js";
 
 const FALLBACK_COLOR = 0xff4655; // Valorant red
 
@@ -40,9 +41,10 @@ const itemEmbed = (item, emojis, lines) => {
     return embed;
 };
 
+const WISHLISTED = "⭐ On your wishlist";
+
 export const dailyEmbeds = (shop, emojis, { header = "Daily shop", wishlist = [] } = {}) => {
     const vp = emojis.get("vp", "VP");
-    const wanted = new Set(wishlist);
     return [
         new EmbedBuilder()
             .setTitle(header)
@@ -50,14 +52,14 @@ export const dailyEmbeds = (shop, emojis, { header = "Daily shop", wishlist = []
             .setColor(FALLBACK_COLOR),
         ...shop.daily.items.map((item) => itemEmbed(item, emojis, [
             price(item.price, vp),
-            item.skinUuid && wanted.has(item.skinUuid) ? "⭐ On your wishlist" : null,
+            isWishlisted(item, wishlist) ? WISHLISTED : null,
         ])),
     ];
 };
 
 const KIND_LABEL = { buddy: "Gun buddy", spray: "Spray", card: "Player card", title: "Player title", flex: "Flex", skin: "Skin" };
 
-export const accessoryEmbeds = (shop, emojis) => {
+export const accessoryEmbeds = (shop, emojis, { wishlist = [] } = {}) => {
     const kc = emojis.get("kc", "KC");
     return [
         new EmbedBuilder()
@@ -68,6 +70,7 @@ export const accessoryEmbeds = (shop, emojis) => {
             KIND_LABEL[item.kind] ?? "Item",
             item.quantity > 1 ? `x${item.quantity}` : null,
             price(item.price, kc),
+            isWishlisted(item, wishlist) ? WISHLISTED : null,
         ])),
     ];
 };
@@ -77,7 +80,6 @@ export const nightMarketEmbeds = (shop, emojis, { wishlist = [] } = {}) => {
         return [new EmbedBuilder().setTitle("Night market").setDescription("The night market isn't open right now.").setColor(FALLBACK_COLOR)];
     }
     const vp = emojis.get("vp", "VP");
-    const wanted = new Set(wishlist);
     return [
         new EmbedBuilder()
             .setTitle("Night market")
@@ -86,7 +88,7 @@ export const nightMarketEmbeds = (shop, emojis, { wishlist = [] } = {}) => {
         ...shop.nightMarket.items.map((item) => itemEmbed(item, emojis, [
             item.seen ? null : "*Not revealed in-game yet*",
             `~~${price(item.basePrice, vp)}~~ → **${price(item.price, vp)}** (-${item.discountPercent}%)`,
-            item.skinUuid && wanted.has(item.skinUuid) ? "⭐ On your wishlist" : null,
+            isWishlisted(item, wishlist) ? WISHLISTED : null,
         ])),
     ];
 };
@@ -121,9 +123,17 @@ export const bundleEmbeds = (shop, emojis) => {
 
 export const alertEmbeds = (hits, emojis) => {
     const vp = emojis.get("vp", "VP");
+    const kc = emojis.get("kc", "KC");
     const embeds = [];
     for (const item of hits.daily) {
         embeds.push(itemEmbed(item, emojis, ["⭐ Wishlisted skin in your **daily shop**", price(item.price, vp)]));
+    }
+    for (const item of hits.accessories) {
+        embeds.push(itemEmbed(item, emojis, [
+            `⭐ Wishlisted ${(KIND_LABEL[item.kind] ?? "item").toLowerCase()} in your **accessory store**`,
+            item.quantity > 1 ? `x${item.quantity}` : null,
+            price(item.price, kc),
+        ]));
     }
     for (const item of hits.nightMarket) {
         embeds.push(itemEmbed(item, emojis, [
@@ -132,4 +142,11 @@ export const alertEmbeds = (hits, emojis) => {
         ]));
     }
     return embeds.slice(0, 10);
+};
+
+/** Card for a wishlist entry. `large` shows the picture full-width (used when adding). */
+export const wishlistItemEmbed = (item, emojis, { large = false, note = null } = {}) => {
+    const embed = itemEmbed(item, emojis, [KIND_LABEL[item.kind] ?? "Item", note]);
+    if (large && item.icon) embed.setThumbnail(null).setImage(item.icon);
+    return embed;
 };

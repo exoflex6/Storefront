@@ -1,13 +1,15 @@
 # Storefront
 
-A self-hosted Discord bot that checks your own Valorant shop and DMs you when a skin on your wishlist shows up.
+A self-hosted Discord bot that checks your own Valorant shop and DMs you when an item on your wishlist shows up.
 It replaces [SkinPeek](https://github.com/giorgi-o/SkinPeek), which was archived in June 2025.
 
 - `/shop`: your daily skin shop
 - `/accessories`: the accessory store (Kingdom Credits)
 - `/nightmarket`: the night market, when it's open
 - `/bundle`: the featured bundle(s)
-- `/wishlist add|remove|list`: skins to alert on (with autocomplete)
+- `/wishlist add|remove|list`: skins and accessories (buddies, sprays, cards, titles, flex) to alert on.
+  Names autocomplete, and the optional `type` filter narrows suggestions to one kind.
+  Adding an item shows its picture; `/wishlist list` shows a card with a picture for each item. Titles have no picture in-game.
 - `/status`: Riot auth status and the next reset times
 
 It's **user-installable**, so the commands work from your account in any server, DM or group DM.
@@ -30,7 +32,7 @@ Your cookie goes to Riot and nowhere else. The only other outside service is val
    - `X-Riot-ClientPlatform` is the standard PC blob.
 5. **Item names, icons and rarity** come from valorant-api.com.
 6. **Reset times** come from the `...RemainingDurationInSeconds` fields in the response.
-   The scheduler re-arms itself for the next daily or night-market reset (plus 90 seconds). After each reset it checks your wishlist and DMs any hits.
+   The scheduler re-arms itself for the next daily, accessory or night-market reset (plus 90 seconds). After each reset it checks your wishlist and DMs any hits.
    It records which shop it alerted on, so a restart doesn't send the same alert again.
 
 ## Setup

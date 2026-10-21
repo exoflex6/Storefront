@@ -7,7 +7,7 @@ import { ShopService } from "../src/shops.js";
 import { Store } from "../src/store.js";
 import { AuthError } from "../src/riot/auth.js";
 import { Emojis } from "../src/discord/embeds.js";
-import { fakeCatalog, storefront, SKIN_B, SKIN_NM } from "./fixtures.js";
+import { fakeCatalog, storefront, SKIN_B, SKIN_NM, BUDDY } from "./fixtures.js";
 
 const setup = ({ storefrontImpl = async () => storefront(), dailyDm = false } = {}) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "storefront-test-"));
@@ -35,6 +35,23 @@ test("alerts once per new shop for wishlisted skins", async (t) => {
     assert.equal(sent[0].embeds.length, 2); // one daily hit, one night market hit
 
     await service.start(); // same shop again (e.g. restart) -> no duplicate DM
+    assert.equal(sent.length, 1);
+});
+
+test("accessory wishlist hits alert once per rotation", async (t) => {
+    let raw = storefront({ nightMarket: false });
+    const { service, store, sent } = setup({ storefrontImpl: async () => raw });
+    t.after(() => service.stop());
+    store.update((s) => { s.wishlist = [BUDDY.buddy]; });
+
+    await service.start();
+    assert.equal(sent.length, 1);
+    assert.match(sent[0].embeds[0].toJSON().description, /accessory store/);
+
+    // New daily shop, same accessories -> no repeat accessory alert.
+    raw = storefront({ nightMarket: false });
+    raw.SkinsPanelLayout.SingleItemStoreOffers.pop();
+    await service.start();
     assert.equal(sent.length, 1);
 });
 

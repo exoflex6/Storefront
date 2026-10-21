@@ -75,36 +75,40 @@ export class ShopService {
 
     async #checkAndAlert(shop) {
         const { lastAlerted, wishlist } = this.store.state;
-        const dailyKey = offerKey(shop.daily.items);
-        const nightKey = shop.nightMarket ? offerKey(shop.nightMarket.items) : null;
-        const newDaily = dailyKey !== lastAlerted.daily;
-        const newNight = nightKey !== null && nightKey !== lastAlerted.nightMarket;
-        if (!newDaily && !newNight) return;
-
         const hits = findWishlistHits(shop, wishlist);
-        if (!newDaily) hits.daily = [];
-        if (!newNight) hits.nightMarket = [];
+        const sections = {
+            daily: shop.daily.items,
+            accessories: shop.accessories.items,
+            nightMarket: shop.nightMarket?.items ?? null,
+        };
+
+        // Only alert on sections whose offers changed since the last alert.
+        const changed = {};
+        for (const [name, items] of Object.entries(sections)) {
+            const key = items ? offerKey(items) : null;
+            if (key !== null && key !== lastAlerted[name]) changed[name] = key;
+            else hits[name] = [];
+        }
+        if (!Object.keys(changed).length) return;
 
         const messages = [];
-        if (hits.daily.length || hits.nightMarket.length) {
+        if (hits.daily.length || hits.accessories.length || hits.nightMarket.length) {
             messages.push({ content: "🔔 Wishlist alert!", embeds: alertEmbeds(hits, this.emojis) });
         }
-        if (newDaily && this.dailyDm) {
+        if (changed.daily && this.dailyDm) {
             messages.push({ embeds: dailyEmbeds(shop, this.emojis, { header: "Today's shop", wishlist }) });
         }
 
         for (const message of messages) await this.notify(message);
         // Only mark as alerted once the DMs went out, so a failed DM is retried next run.
-        this.store.update((s) => {
-            if (newDaily) s.lastAlerted.daily = dailyKey;
-            if (newNight) s.lastAlerted.nightMarket = nightKey;
-        });
+        this.store.update((s) => { Object.assign(s.lastAlerted, changed); });
     }
 }
 
-/** Earliest upcoming reset we care about for alerts (daily shop or night market). */
+/** Earliest upcoming reset we care about for alerts (daily shop, accessories or night market). */
 export const nextReset = (shop) => Math.min(
     shop.daily.resetsAt ?? Infinity,
+    shop.accessories.resetsAt ?? Infinity,
     shop.nightMarket?.resetsAt ?? Infinity,
     shop.fetchedAt + MAX_DELAY_MS,
 );

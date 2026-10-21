@@ -20,10 +20,10 @@ const tierColor = (rgba) => (rgba ? parseInt(rgba.slice(0, 6), 16) : null);
 
 export class Catalog {
     constructor() {
-        /** Any storefront item UUID -> {uuid, kind, name, icon, tier?, skinUuid?} */
+        /** Any storefront item or level UUID -> {uuid, kind, name, icon, tier?, parentUuid?} */
         this.items = new Map();
-        /** Skin UUID -> skin entry (the wishlist is keyed on these) */
-        this.skins = new Map();
+        /** Top-level items that can go on the wishlist (keyed by their `uuid`) */
+        this.wishlistable = [];
         this.bundles = new Map();
         this.tiers = new Map();
         this.loadedAt = 0;
@@ -42,10 +42,10 @@ export class Catalog {
     }
 
     async #load() {
-        const [tiers, skins, buddyLevels, sprays, cards, titles, flex, bundles] = await Promise.all([
+        const [tiers, skins, buddies, sprays, cards, titles, flex, bundles] = await Promise.all([
             get("contenttiers"),
             get("weapons/skins"),
-            get("buddies/levels"),
+            get("buddies"),
             get("sprays"),
             get("playercards"),
             get("playertitles"),
@@ -61,29 +61,39 @@ export class Catalog {
         }]));
 
         const items = new Map();
-        const skinMap = new Map();
+        // Store offers reference an item's level UUID (skins, buddies, sprays); map
+        // those back to the parent so the wishlist key is stable across levels.
+        const add = (entry, levels = []) => {
+            items.set(entry.uuid, entry);
+            for (const level of levels) {
+                if (level.uuid !== entry.uuid) items.set(level.uuid, { ...entry, parentUuid: entry.uuid });
+            }
+        };
+
         for (const skin of skins) {
-            const entry = {
+            add({
                 uuid: skin.uuid,
                 kind: "skin",
                 name: skin.displayName,
                 icon: skin.levels[0]?.displayIcon || skin.displayIcon,
                 tier: tierMap.get(skin.contentTierUuid) ?? null,
-            };
-            skinMap.set(skin.uuid, entry);
-            items.set(skin.uuid, entry);
-            // Store offers reference the skin's first level; map every level for safety.
-            for (const level of skin.levels) items.set(level.uuid, { ...entry, skinUuid: skin.uuid });
+                // Defaults and "Random Favorite Skin" have no tier and are never sold.
+                wishlistable: Boolean(skin.contentTierUuid),
+            }, skin.levels);
         }
-        for (const b of buddyLevels) items.set(b.uuid, { uuid: b.uuid, kind: "buddy", name: b.displayName, icon: b.displayIcon });
-        for (const s of sprays) items.set(s.uuid, { uuid: s.uuid, kind: "spray", name: s.displayName, icon: s.fullTransparentIcon || s.displayIcon });
-        for (const c of cards) items.set(c.uuid, { uuid: c.uuid, kind: "card", name: c.displayName, icon: c.largeArt || c.displayIcon });
-        for (const t of titles) items.set(t.uuid, { uuid: t.uuid, kind: "title", name: t.titleText || t.displayName, icon: null });
-        for (const f of flex) items.set(f.uuid, { uuid: f.uuid, kind: "flex", name: f.displayName, icon: f.displayIcon });
+        for (const b of buddies) add({ uuid: b.uuid, kind: "buddy", name: b.displayName, icon: b.displayIcon, wishlistable: true }, b.levels);
+        for (const s of sprays) {
+            add({ uuid: s.uuid, kind: "spray", name: s.displayName, icon: s.fullTransparentIcon || s.displayIcon, wishlistable: !s.isNullSpray }, s.levels);
+        }
+        for (const c of cards) add({ uuid: c.uuid, kind: "card", name: c.displayName, icon: c.largeArt || c.displayIcon, wishlistable: true });
+        for (const t of titles) {
+            add({ uuid: t.uuid, kind: "title", name: t.titleText || t.displayName, icon: null, wishlistable: Boolean(t.titleText) });
+        }
+        for (const f of flex) add({ uuid: f.uuid, kind: "flex", name: f.displayName, icon: f.displayIcon, wishlistable: true });
 
         this.tiers = tierMap;
         this.items = items;
-        this.skins = skinMap;
+        this.wishlistable = [...items.values()].filter((i) => i.wishlistable && !i.parentUuid && i.name);
         this.bundles = new Map(bundles.map((b) => [b.uuid, {
             uuid: b.uuid,
             name: b.displayName,
@@ -96,25 +106,25 @@ export class Catalog {
         return this.items.get(uuid) ?? { uuid, kind: "unknown", name: `Unknown item (${uuid.slice(0, 8)})`, icon: null };
     }
 
-    /** Skin UUID for any skin/level UUID, or null if it isn't a skin. */
-    skinUuidFor(uuid) {
+    /** Wishlist key for any item or level UUID (the top-level item's UUID), or null if unknown. */
+    wishlistKeyFor(uuid) {
         const item = this.items.get(uuid);
-        if (!item || item.kind !== "skin") return null;
-        return item.skinUuid ?? item.uuid;
+        if (!item) return null;
+        return item.parentUuid ?? item.uuid;
     }
 
-    /** Fuzzy-ish skin search for autocomplete. Skips default "Standard" skins. */
-    searchSkins(query, limit = 25) {
+    /** Prefix matches first, then substring matches, optionally limited to one kind. */
+    searchWishlistable(query, { kind = null, limit = 25 } = {}) {
         const q = query.trim().toLowerCase();
         const results = [];
-        for (const skin of this.skins.values()) {
-            if (!skin.tier) continue; // defaults and "Random Favorite Skin" have no tier
-            const name = skin.name.toLowerCase();
+        for (const item of this.wishlistable) {
+            if (kind && item.kind !== kind) continue;
+            const name = item.name.toLowerCase();
             const index = q ? name.indexOf(q) : 0;
             if (index === -1) continue;
-            results.push({ skin, score: index === 0 ? 0 : 1, name });
+            results.push({ item, score: index === 0 ? 0 : 1, name });
         }
         results.sort((a, b) => a.score - b.score || a.name.localeCompare(b.name));
-        return results.slice(0, limit).map((r) => r.skin);
+        return results.slice(0, limit).map((r) => r.item);
     }
 }
