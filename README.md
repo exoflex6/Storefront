@@ -41,7 +41,9 @@ Your cookie goes to Riot and nowhere else. The only other outside service is val
 ### 1. Discord application
 
 1. Go to <https://discord.com/developers/applications> and create a **New Application**.
-2. **Bot** tab: **Reset Token** and copy it into `DISCORD_TOKEN`. You don't need any privileged intents.
+2. **General Information** tab (optional): upload `assets/branding/icon.png` as the **App Icon**.
+   **Bot** tab: upload `assets/branding/banner.png` as the **Banner**. Both have SVG sources next to them.
+   Then, still on the **Bot** tab, **Reset Token** and copy it into `DISCORD_TOKEN`. You don't need any privileged intents.
    Turn off **Public Bot** so nobody else can install it.
 3. **Installation** tab:
    - Under Installation Contexts, enable **User Install**. Enable **Guild Install** too if you want it in a server.
