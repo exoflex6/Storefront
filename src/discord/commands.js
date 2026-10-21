@@ -26,6 +26,7 @@ export const commandDefinitions = [
     shopCommand("accessories", "Your Valorant accessory store"),
     shopCommand("nightmarket", "Your Valorant night market, if it's open"),
     shopCommand("bundle", "The current featured bundle(s)"),
+    shopCommand("store", "Everything at once: daily shop, accessories, night market and bundles"),
     everywhere(new SlashCommandBuilder()
         .setName("wishlist")
         .setDescription("Skins and accessories to alert you about")
@@ -45,19 +46,27 @@ export const commandDefinitions = [
  * @param {{store: import("../store.js").Store, shops: import("../shops.js").ShopService, catalog: import("../content.js").Catalog, emojis: import("./embeds.js").Emojis, ownerId: string}} deps
  */
 export const createHandlers = ({ store, shops, catalog, emojis, ownerId }) => {
-    const views = {
+    const sections = {
         shop: (shop) => dailyEmbeds(shop, emojis, { wishlist: store.state.wishlist }),
         accessories: (shop) => accessoryEmbeds(shop, emojis, { wishlist: store.state.wishlist }),
         nightmarket: (shop) => nightMarketEmbeds(shop, emojis, { wishlist: store.state.wishlist }),
         bundle: (shop) => bundleEmbeds(shop, emojis),
     };
+    // Each view returns messages (arrays of embeds); /store sends one or more per section.
+    const views = {
+        ...Object.fromEntries(Object.entries(sections).map(([name, view]) => [name, (shop) => [view(shop)]])),
+        store: (shop) => pageEmbeds(Object.values(sections).map((view) => view(shop))),
+    };
 
     const handleShop = async (interaction) => {
         const share = interaction.options.getBoolean("share") ?? false;
-        await interaction.deferReply(share ? {} : { flags: MessageFlags.Ephemeral });
+        const visibility = share ? {} : { flags: MessageFlags.Ephemeral };
+        await interaction.deferReply(visibility);
         try {
             const shop = await shops.get();
-            await interaction.editReply({ embeds: views[interaction.commandName](shop) });
+            const [first, ...rest] = views[interaction.commandName](shop);
+            await interaction.editReply({ embeds: first });
+            for (const embeds of rest) await interaction.followUp({ embeds, ...visibility });
         } catch (err) {
             await interaction.editReply({ content: describeError(err) });
         }

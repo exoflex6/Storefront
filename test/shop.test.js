@@ -132,3 +132,34 @@ test("alert pages keep a player card's gallery together", async () => {
     assert.ok(pages[1].every((e) => e.url === PLAYER_CARD.views[0]));
     assert.match(pages[1][0].description, /accessory store/);
 });
+
+test("/store groups every section into messages of at most 10 embeds", async () => {
+    const { createHandlers } = await import("../src/discord/commands.js");
+    const { Emojis } = await import("../src/discord/embeds.js");
+    const shop = parseStorefront(storefront(), fakeCatalog(), NOW);
+    const calls = [];
+    const interaction = {
+        user: { id: "owner" },
+        commandName: "store",
+        isAutocomplete: () => false,
+        isChatInputCommand: () => true,
+        options: { getBoolean: () => null },
+        deferReply: async (o) => calls.push(["defer", o]),
+        editReply: async (o) => calls.push(["edit", o]),
+        followUp: async (o) => calls.push(["followUp", o]),
+    };
+    const handle = createHandlers({
+        store: { state: { wishlist: [] } },
+        shops: { get: async () => shop },
+        catalog: fakeCatalog(),
+        emojis: new Emojis(),
+        ownerId: "owner",
+    });
+    await handle(interaction);
+    const messages = calls.filter(([kind]) => kind !== "defer").map(([, o]) => o.embeds.map((e) => e.toJSON().title));
+    // All four sections (8 embeds) fit one message; larger shops spill into follow-ups.
+    assert.deepEqual(messages, [
+        ["Daily shop", "Prime Vandal", "Reaver Sheriff", "Accessory store", "Lucky Buddy", "Night market", "Oni Phantom", "Prime 2.0"],
+    ]);
+    assert.ok(calls.every(([kind, o]) => kind === "edit" || o.flags)); // private by default
+});

@@ -7,6 +7,7 @@ It replaces [SkinPeek](https://github.com/giorgi-o/SkinPeek), which was archived
 - `/accessories`: the accessory store (Kingdom Credits)
 - `/nightmarket`: the night market, when it's open
 - `/bundle`: the featured bundle(s)
+- `/store`: all of the above in one go (sent as more than one message if it's over Discord's 10-card limit)
 - `/wishlist add|remove|list`: skins and accessories (buddies, sprays, cards, titles, flex) to alert on.
   Names autocomplete, and the optional `type` filter narrows suggestions to one kind.
   Adding an item shows its picture; `/wishlist list` shows a card with a picture for each item. Titles have no picture in-game.
