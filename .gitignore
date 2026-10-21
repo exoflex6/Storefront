@@ -1,0 +1,8 @@
+node_modules/
+# Secrets: Discord token, Riot ssid cookie
+.env
+.env.*
+!.env.example
+# Bot state, including rotated Riot cookies
+data/
+*.log

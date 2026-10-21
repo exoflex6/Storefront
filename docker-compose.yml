@@ -1,0 +1,11 @@
+services:
+  storefront:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      # Named volume: holds the wishlist and the rotated Riot cookies.
+      - storefront-data:/data
+
+volumes:
+  storefront-data:
