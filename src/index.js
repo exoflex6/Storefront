@@ -28,7 +28,7 @@ const notify = async (payload) => {
     await owner.send(payload);
 };
 
-const shops = new ShopService({ riot, catalog, store, emojis, dailyDm: config.dailyDm, notify });
+const shops = new ShopService({ riot, catalog, store, emojis, notify });
 const handle = createHandlers({ store, shops, catalog, emojis, ownerId: config.ownerId });
 
 client.on(Events.InteractionCreate, async (interaction) => {

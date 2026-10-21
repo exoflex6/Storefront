@@ -1,7 +1,7 @@
 import { parseStorefront, findWishlistHits, offerKey } from "./shop.js";
 import { AuthError } from "./riot/auth.js";
 import { REFRESH_INSTRUCTIONS, describeError } from "./errors.js";
-import { alertEmbeds, dailyEmbeds } from "./discord/embeds.js";
+import { accessoryEmbeds, alertEmbeds, bundleEmbeds, dailyEmbeds, nightMarketEmbeds, pageEmbeds } from "./discord/embeds.js";
 
 // Serve repeated /shop calls from cache, but never past a reset.
 const CACHE_MS = 5 * 60 * 1000;
@@ -14,12 +14,11 @@ const MAX_DELAY_MS = 24 * 60 * 60 * 1000;
 
 /** Fetches/caches the shop, runs the post-reset checks, and DMs the owner. */
 export class ShopService {
-    constructor({ riot, catalog, store, emojis, dailyDm, notify }) {
+    constructor({ riot, catalog, store, emojis, notify }) {
         this.riot = riot;
         this.catalog = catalog;
         this.store = store;
         this.emojis = emojis;
-        this.dailyDm = dailyDm;
         /** @type {(payload: import("discord.js").MessageCreateOptions) => Promise<void>} */
         this.notify = notify;
         this.cache = null;
@@ -74,20 +73,21 @@ export class ShopService {
     }
 
     async #checkAndAlert(shop) {
-        const { lastAlerted, wishlist } = this.store.state;
+        const { lastAlerted, wishlist, autoPost } = this.store.state;
         const hits = findWishlistHits(shop, wishlist);
         const sections = {
             daily: shop.daily.items,
             accessories: shop.accessories.items,
             nightMarket: shop.nightMarket?.items ?? null,
+            bundles: shop.bundles.length ? shop.bundles : null,
         };
 
-        // Only alert on sections whose offers changed since the last alert.
+        // Only post sections whose offers changed since the last check.
         const changed = {};
         for (const [name, items] of Object.entries(sections)) {
             const key = items ? offerKey(items) : null;
             if (key !== null && key !== lastAlerted[name]) changed[name] = key;
-            else hits[name] = [];
+            else if (name in hits) hits[name] = [];
         }
         if (!Object.keys(changed).length) return;
 
@@ -97,20 +97,29 @@ export class ShopService {
                 messages.push(i === 0 ? { content: "🔔 Wishlist alert!", embeds } : { embeds });
             });
         }
-        if (changed.daily && this.dailyDm) {
-            messages.push({ embeds: dailyEmbeds(shop, this.emojis, { header: "Today's shop", wishlist }) });
-        }
+
+        const fullSections = {
+            daily: () => dailyEmbeds(shop, this.emojis, { header: "Today's shop", wishlist }),
+            accessories: () => accessoryEmbeds(shop, this.emojis, { wishlist }),
+            nightMarket: () => nightMarketEmbeds(shop, this.emojis, { wishlist }),
+            bundles: () => bundleEmbeds(shop, this.emojis),
+        };
+        const posts = Object.keys(fullSections)
+            .filter((name) => name in changed && autoPost[name])
+            .map((name) => fullSections[name]());
+        for (const embeds of pageEmbeds(posts)) messages.push({ embeds });
 
         for (const message of messages) await this.notify(message);
-        // Only mark as alerted once the DMs went out, so a failed DM is retried next run.
+        // Only mark as posted once the DMs went out, so a failed DM is retried next run.
         this.store.update((s) => { Object.assign(s.lastAlerted, changed); });
     }
 }
 
-/** Earliest upcoming reset we care about for alerts (daily shop, accessories or night market). */
+/** Earliest upcoming reset of any section (daily shop, accessories, night market, bundles). */
 export const nextReset = (shop) => Math.min(
     shop.daily.resetsAt ?? Infinity,
     shop.accessories.resetsAt ?? Infinity,
     shop.nightMarket?.resetsAt ?? Infinity,
+    ...shop.bundles.map((bundle) => bundle.resetsAt ?? Infinity),
     shop.fetchedAt + MAX_DELAY_MS,
 );

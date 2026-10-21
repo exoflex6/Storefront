@@ -10,7 +10,9 @@ const defaults = () => ({
     seedHash: null,
     wishlist: [],
     // Last offer sets we alerted on, so restarts don't re-send the same DM.
-    lastAlerted: { daily: null, accessories: null, nightMarket: null },
+    lastAlerted: { daily: null, accessories: null, nightMarket: null, bundles: null },
+    // Which sections get DMed in full whenever they reset (toggled with /autopost).
+    autoPost: { daily: true, accessories: true, nightMarket: true, bundles: true },
     authDeadNotified: false,
 });
 
@@ -21,7 +23,13 @@ export class Store {
         this.state = defaults();
         if (fs.existsSync(this.file)) {
             const saved = JSON.parse(fs.readFileSync(this.file, "utf8"));
-            this.state = { ...defaults(), ...saved, lastAlerted: { ...defaults().lastAlerted, ...saved.lastAlerted } };
+            const base = defaults();
+            this.state = {
+                ...base,
+                ...saved,
+                lastAlerted: { ...base.lastAlerted, ...saved.lastAlerted },
+                autoPost: { ...base.autoPost, ...saved.autoPost },
+            };
         }
     }
 

@@ -26,7 +26,5 @@ export const config = {
     // Optional override; otherwise detected from the account via riot-geo.
     shard: process.env.RIOT_SHARD || "",
     dataDir: path.resolve(process.env.DATA_DIR || "./data"),
-    // DM the full daily shop after every reset, not just wishlist hits.
-    dailyDm: bool(process.env.DAILY_DM, false),
     logUrls: bool(process.env.LOG_URLS, false),
 };

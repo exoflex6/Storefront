@@ -163,3 +163,31 @@ test("/store groups every section into messages of at most 10 embeds", async () 
     ]);
     assert.ok(calls.every(([kind, o]) => kind === "edit" || o.flags)); // private by default
 });
+
+test("/autopost toggles a section and shows settings", async () => {
+    const { createHandlers } = await import("../src/discord/commands.js");
+    const { Emojis } = await import("../src/discord/embeds.js");
+    const state = { wishlist: [], autoPost: { daily: true, accessories: true, nightMarket: true, bundles: true } };
+    const replies = [];
+    const run = (opts) => createHandlers({
+        store: { state, update: (fn) => fn(state) },
+        shops: {},
+        catalog: fakeCatalog(),
+        emojis: new Emojis(),
+        ownerId: "owner",
+    })({
+        user: { id: "owner" },
+        commandName: "autopost",
+        isAutocomplete: () => false,
+        isChatInputCommand: () => true,
+        options: { getString: () => opts.section ?? null, getBoolean: () => opts.enabled ?? null },
+        reply: async (o) => replies.push(o.content),
+    });
+    await run({ section: "bundles", enabled: false });
+    assert.equal(state.autoPost.bundles, false);
+    assert.match(replies[0], /⬜ Bundles/);
+    assert.match(replies[0], /✅ Daily shop/);
+    await run({ section: "bundles" });
+    assert.match(replies[1], /Pick both/);
+    assert.equal(state.autoPost.bundles, false);
+});

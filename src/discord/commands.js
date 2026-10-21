@@ -19,7 +19,14 @@ const shareOption = (builder) => builder.addBooleanOption((o) => o
 
 const KIND_CHOICES = { skin: "Skin", buddy: "Gun buddy", spray: "Spray", card: "Player card", title: "Player title", flex: "Flex" };
 
+const AUTO_POST_SECTIONS = { daily: "Daily shop", accessories: "Accessories", nightMarket: "Night market", bundles: "Bundles" };
+
 const shopCommand = (name, description) => everywhere(shareOption(new SlashCommandBuilder().setName(name).setDescription(description)));
+
+const describeAutoPost = (autoPost) => {
+    const on = Object.entries(AUTO_POST_SECTIONS).filter(([key]) => autoPost[key]).map(([, name]) => name.toLowerCase());
+    return on.length ? on.join(", ") : "off";
+};
 
 export const commandDefinitions = [
     shopCommand("shop", "Your daily Valorant skin shop"),
@@ -37,6 +44,12 @@ export const commandDefinitions = [
         .addSubcommand((s) => s.setName("remove").setDescription("Remove an item from your wishlist")
             .addStringOption((o) => o.setName("item").setDescription("Item name").setRequired(true).setAutocomplete(true)))
         .addSubcommand((s) => s.setName("list").setDescription("Show your wishlist"))),
+    everywhere(new SlashCommandBuilder()
+        .setName("autopost")
+        .setDescription("DM the full shop whenever it resets (no options: show current settings)")
+        .addStringOption((o) => o.setName("section").setDescription("Which part of the shop")
+            .addChoices(...Object.entries(AUTO_POST_SECTIONS).map(([value, name]) => ({ name, value }))))
+        .addBooleanOption((o) => o.setName("enabled").setDescription("Turn automatic posts on or off"))),
     everywhere(new SlashCommandBuilder()
         .setName("status")
         .setDescription("Riot auth status and next shop resets")),
@@ -122,8 +135,23 @@ export const createHandlers = ({ store, shops, catalog, emojis, ownerId }) => {
         } catch (err) {
             lines.push(`❌ ${describeError(err)}`);
         }
-        lines.push(`Wishlist: ${store.state.wishlist.length} item(s) · Daily DM: ${shops.dailyDm ? "on" : "off"}`);
+        lines.push(`Wishlist: ${store.state.wishlist.length} item(s) · Auto-posts: ${describeAutoPost(store.state.autoPost)}`);
         await interaction.editReply({ content: lines.join("\n") });
+    };
+
+    const handleAutoPost = async (interaction) => {
+        const section = interaction.options.getString("section");
+        const enabled = interaction.options.getBoolean("enabled");
+        if (section && enabled !== null) {
+            store.update((s) => { s.autoPost[section] = enabled; });
+        } else if (section || enabled !== null) {
+            return interaction.reply({ content: "Pick both a `section` and `enabled`, or neither to see your settings.", ...ephemeral });
+        }
+        const lines = Object.entries(AUTO_POST_SECTIONS).map(([key, name]) => `${store.state.autoPost[key] ? "✅" : "⬜"} ${name}`);
+        return interaction.reply({
+            content: `**Automatic DMs when each section resets**\n${lines.join("\n")}\n-# Wishlist alerts are always on.`,
+            ...ephemeral,
+        });
     };
 
     const handleAutocomplete = async (interaction) => {
@@ -155,6 +183,7 @@ export const createHandlers = ({ store, shops, catalog, emojis, ownerId }) => {
 
         if (interaction.commandName in views) return handleShop(interaction);
         if (interaction.commandName === "wishlist") return handleWishlist(interaction);
+        if (interaction.commandName === "autopost") return handleAutoPost(interaction);
         if (interaction.commandName === "status") return handleStatus(interaction);
     };
 };

@@ -12,6 +12,9 @@ It replaces [SkinPeek](https://github.com/giorgi-o/SkinPeek), which was archived
   Names autocomplete, and the optional `type` filter narrows suggestions to one kind.
   Adding an item shows its picture; `/wishlist list` shows a card with a picture for each item. Titles have no picture in-game.
   Player cards show all three art views (large, wide and small) when you add one and in alerts.
+- `/autopost`: choose which sections get DMed to you in full whenever they reset.
+  The daily shop resets every day, accessories every week, the night market when it opens, and bundles when they change. All four are on by default.
+  Run it with no options to see your settings, or e.g. `/autopost section:Bundles enabled:false`.
 - `/status`: Riot auth status and the next reset times
 
 It's **user-installable**, so the commands work from your account in any server, DM or group DM.
@@ -34,7 +37,8 @@ Your cookie goes to Riot and nowhere else. The only other outside service is val
    - `X-Riot-ClientPlatform` is the standard PC blob.
 5. **Item names, icons and rarity** come from valorant-api.com.
 6. **Reset times** come from the `...RemainingDurationInSeconds` fields in the response.
-   The scheduler re-arms itself for the next daily, accessory or night-market reset (plus 90 seconds). After each reset it checks your wishlist and DMs any hits.
+   The scheduler re-arms itself for the next reset of any section (plus 90 seconds).
+   After each reset it DMs you the sections that changed (per `/autopost`) and a separate alert for any wishlist hits.
    It records which shop it alerted on, so a restart doesn't send the same alert again.
 
 ## Setup
@@ -112,7 +116,6 @@ Run `npm run deploy-commands` again whenever the command definitions change.
 | `OWNER_ID` | yes | Your Discord user ID. The bot ignores everyone else. |
 | `RIOT_SSID` / `RIOT_COOKIES` | yes | See above |
 | `RIOT_SHARD` | no | `na`, `eu`, `ap` or `kr`. Detected automatically if unset. |
-| `DAILY_DM` | no | `true` DMs you the full daily shop after every reset, not just wishlist hits |
 | `DATA_DIR` | no | Default `./data` (`/data` in Docker) |
 | `LOG_URLS` | no | Log request URLs (without query strings) for debugging |
 

@@ -9,9 +9,12 @@ import { AuthError } from "../src/riot/auth.js";
 import { Emojis } from "../src/discord/embeds.js";
 import { fakeCatalog, storefront, SKIN_B, SKIN_NM, BUDDY } from "./fixtures.js";
 
-const setup = ({ storefrontImpl = async () => storefront(), dailyDm = false } = {}) => {
+const ALL_OFF = { daily: false, accessories: false, nightMarket: false, bundles: false };
+
+const setup = ({ storefrontImpl = async () => storefront(), autoPost = ALL_OFF } = {}) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "storefront-test-"));
     const store = new Store(dir);
+    store.update((s) => { s.autoPost = { ...autoPost }; });
     const sent = [];
     const catalog = { ...fakeCatalog(), ensureLoaded: async () => {} };
     const service = new ShopService({
@@ -19,7 +22,6 @@ const setup = ({ storefrontImpl = async () => storefront(), dailyDm = false } = 
         catalog,
         store,
         emojis: new Emojis(),
-        dailyDm,
         notify: async (msg) => { sent.push(msg); },
     });
     return { service, store, sent, dir };
@@ -55,12 +57,60 @@ test("accessory wishlist hits alert once per rotation", async (t) => {
     assert.equal(sent.length, 1);
 });
 
-test("daily DM sends the full shop even without wishlist hits", async (t) => {
-    const { service, sent } = setup({ dailyDm: true });
+const titles = (message) => message.embeds.map((e) => e.toJSON().title);
+
+test("auto-post DMs every enabled section, grouped into messages", async (t) => {
+    const { service, sent } = setup({ autoPost: { daily: true, accessories: true, nightMarket: true, bundles: true } });
+    t.after(() => service.stop());
+    await service.start();
+    assert.deepEqual(sent.map(titles), [[
+        "Today's shop", "Prime Vandal", "Reaver Sheriff",
+        "Accessory store", "Lucky Buddy",
+        "Night market", "Oni Phantom",
+        "Prime 2.0",
+    ]]);
+});
+
+test("auto-post only re-sends the sections that reset", async (t) => {
+    let raw = storefront({ nightMarket: false });
+    const { service, sent } = setup({
+        storefrontImpl: async () => raw,
+        autoPost: { daily: true, accessories: true, nightMarket: true, bundles: true },
+    });
     t.after(() => service.stop());
     await service.start();
     assert.equal(sent.length, 1);
-    assert.equal(sent[0].embeds.length, 3); // header + 2 skins
+
+    // Next day: new daily shop, accessories and bundle unchanged.
+    raw = storefront({ nightMarket: false });
+    raw.SkinsPanelLayout.SingleItemStoreOffers.pop();
+    await service.start();
+    assert.deepEqual(titles(sent[1]), ["Today's shop", "Prime Vandal"]);
+
+    // Accessory rotation: only accessories go out.
+    raw = structuredClone(raw);
+    raw.AccessoryStore.AccessoryStoreOffers[0].Offer.Rewards[0].ItemID = SKIN_B.level;
+    await service.start();
+    assert.deepEqual(titles(sent[2]), ["Accessory store", "Reaver Sheriff"]);
+    assert.equal(sent.length, 3);
+});
+
+test("disabled sections aren't auto-posted, but wishlist alerts still are", async (t) => {
+    const { service, store, sent } = setup({ autoPost: { ...ALL_OFF, accessories: true } });
+    t.after(() => service.stop());
+    store.update((s) => { s.wishlist = [SKIN_B.skin]; });
+    await service.start();
+    assert.equal(sent[0].content, "🔔 Wishlist alert!");
+    assert.deepEqual(titles(sent[1]), ["Accessory store", "Lucky Buddy"]);
+    assert.equal(sent.length, 2);
+});
+
+test("saved state without autoPost settings gets the defaults (all on)", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "storefront-test-"));
+    fs.writeFileSync(path.join(dir, "state.json"), JSON.stringify({ wishlist: ["x"], lastAlerted: { daily: "k" } }));
+    const store = new Store(dir);
+    assert.deepEqual(store.state.autoPost, { daily: true, accessories: true, nightMarket: true, bundles: true });
+    assert.deepEqual(store.state.lastAlerted, { daily: "k", accessories: null, nightMarket: null, bundles: null });
 });
 
 test("dead cookie notifies the owner once, and resets after recovery", async (t) => {
