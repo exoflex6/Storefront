@@ -93,7 +93,9 @@ export class ShopService {
 
         const messages = [];
         if (hits.daily.length || hits.accessories.length || hits.nightMarket.length) {
-            messages.push({ content: "🔔 Wishlist alert!", embeds: alertEmbeds(hits, this.emojis) });
+            alertEmbeds(hits, this.emojis).forEach((embeds, i) => {
+                messages.push(i === 0 ? { content: "🔔 Wishlist alert!", embeds } : { embeds });
+            });
         }
         if (changed.daily && this.dailyDm) {
             messages.push({ embeds: dailyEmbeds(shop, this.emojis, { header: "Today's shop", wishlist }) });

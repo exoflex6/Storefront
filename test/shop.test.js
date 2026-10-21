@@ -70,7 +70,7 @@ test("nextReset picks the earliest of daily and night market", () => {
 });
 
 test("every embed view builds within Discord limits", async () => {
-    const { Emojis, dailyEmbeds, accessoryEmbeds, nightMarketEmbeds, bundleEmbeds, wishlistItemEmbed, alertEmbeds } = await import("../src/discord/embeds.js");
+    const { Emojis, dailyEmbeds, accessoryEmbeds, nightMarketEmbeds, bundleEmbeds, alertEmbeds } = await import("../src/discord/embeds.js");
     const emojis = new Emojis();
     for (const shop of [parseStorefront(storefront(), fakeCatalog(), NOW), parseStorefront(storefront({ nightMarket: false }), fakeCatalog(), NOW)]) {
         for (const view of [dailyEmbeds, accessoryEmbeds, nightMarketEmbeds, bundleEmbeds]) {
@@ -79,19 +79,56 @@ test("every embed view builds within Discord limits", async () => {
         }
     }
     const shop = parseStorefront(storefront(), fakeCatalog(), NOW);
-    const alerts = alertEmbeds(findWishlistHits(shop, [SKIN_A.skin, BUDDY.buddy, SKIN_NM.skin]), emojis).map((e) => e.toJSON());
+    const pages = alertEmbeds(findWishlistHits(shop, [SKIN_A.skin, BUDDY.buddy, SKIN_NM.skin]), emojis);
+    assert.equal(pages.length, 1);
+    const alerts = pages[0].map((e) => e.toJSON());
     assert.equal(alerts.length, 3);
     assert.ok(alerts.every((e) => e.thumbnail?.url));
 });
 
 test("wishlist cards show the item picture, full-width when large", async () => {
-    const { Emojis, wishlistItemEmbed } = await import("../src/discord/embeds.js");
+    const { Emojis, wishlistItemEmbeds } = await import("../src/discord/embeds.js");
     const item = fakeCatalog().item(SKIN_A.skin);
-    const small = wishlistItemEmbed(item, new Emojis()).toJSON();
+    const [small] = wishlistItemEmbeds(item, new Emojis()).map((e) => e.toJSON());
     assert.equal(small.thumbnail.url, item.icon);
-    const large = wishlistItemEmbed(item, new Emojis(), { large: true }).toJSON();
-    assert.equal(large.image.url, item.icon);
-    assert.equal(large.thumbnail, undefined);
+    const large = wishlistItemEmbeds(item, new Emojis(), { large: true }).map((e) => e.toJSON());
+    assert.equal(large.length, 1);
+    assert.equal(large[0].image.url, item.icon);
+    assert.equal(large[0].thumbnail, undefined);
     // Titles have no picture; the card still builds.
-    assert.ok(wishlistItemEmbed({ uuid: "t", kind: "title", name: "Tiger", icon: null }, new Emojis()).toJSON().title);
+    assert.ok(wishlistItemEmbeds({ uuid: "t", kind: "title", name: "Tiger", icon: null }, new Emojis())[0].toJSON().title);
+});
+
+const PLAYER_CARD = {
+    uuid: "card-1",
+    kind: "card",
+    name: "Oni Card",
+    icon: "https://img/large.png",
+    views: ["https://img/large.png", "https://img/wide.png", "https://img/small.png"],
+};
+
+test("player card preview is a gallery of all three art views", async () => {
+    const { Emojis, wishlistItemEmbeds } = await import("../src/discord/embeds.js");
+    const embeds = wishlistItemEmbeds(PLAYER_CARD, new Emojis(), { large: true }).map((e) => e.toJSON());
+    assert.deepEqual(embeds.map((e) => e.image.url), PLAYER_CARD.views);
+    // Discord only merges embeds into one gallery when they share a url.
+    assert.ok(embeds.every((e) => e.url === PLAYER_CARD.views[0]));
+    assert.equal(embeds[0].title, "Oni Card");
+    assert.equal(embeds[0].thumbnail, undefined);
+    // The compact list view stays a single thumbnail card.
+    assert.equal(wishlistItemEmbeds(PLAYER_CARD, new Emojis()).length, 1);
+});
+
+test("alert pages keep a player card's gallery together", async () => {
+    const { Emojis, alertEmbeds } = await import("../src/discord/embeds.js");
+    const skin = fakeCatalog().item(SKIN_A.skin);
+    const hits = {
+        daily: Array(8).fill(skin),
+        accessories: [{ ...PLAYER_CARD, quantity: 1, price: 2000 }],
+        nightMarket: [],
+    };
+    const pages = alertEmbeds(hits, new Emojis()).map((page) => page.map((e) => e.toJSON()));
+    assert.deepEqual(pages.map((p) => p.length), [8, 3]);
+    assert.ok(pages[1].every((e) => e.url === PLAYER_CARD.views[0]));
+    assert.match(pages[1][0].description, /accessory store/);
 });

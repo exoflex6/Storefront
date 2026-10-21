@@ -10,6 +10,7 @@ It replaces [SkinPeek](https://github.com/giorgi-o/SkinPeek), which was archived
 - `/wishlist add|remove|list`: skins and accessories (buddies, sprays, cards, titles, flex) to alert on.
   Names autocomplete, and the optional `type` filter narrows suggestions to one kind.
   Adding an item shows its picture; `/wishlist list` shows a card with a picture for each item. Titles have no picture in-game.
+  Player cards show all three art views (large, wide and small) when you add one and in alerts.
 - `/status`: Riot auth status and the next reset times
 
 It's **user-installable**, so the commands work from your account in any server, DM or group DM.

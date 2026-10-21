@@ -85,7 +85,17 @@ export class Catalog {
         for (const s of sprays) {
             add({ uuid: s.uuid, kind: "spray", name: s.displayName, icon: s.fullTransparentIcon || s.displayIcon, wishlistable: !s.isNullSpray }, s.levels);
         }
-        for (const c of cards) add({ uuid: c.uuid, kind: "card", name: c.displayName, icon: c.largeArt || c.displayIcon, wishlistable: true });
+        for (const c of cards) {
+            add({
+                uuid: c.uuid,
+                kind: "card",
+                name: c.displayName,
+                icon: c.largeArt || c.displayIcon,
+                // Large (in-game banner), wide (scoreboard) and small (icon) art.
+                views: [c.largeArt, c.wideArt, c.smallArt].filter(Boolean),
+                wishlistable: true,
+            });
+        }
         for (const t of titles) {
             add({ uuid: t.uuid, kind: "title", name: t.titleText || t.displayName, icon: null, wishlistable: Boolean(t.titleText) });
         }

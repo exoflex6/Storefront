@@ -121,32 +121,65 @@ export const bundleEmbeds = (shop, emojis) => {
     });
 };
 
+/**
+ * Discord merges embeds that share a `url` into one card with an image gallery
+ * (up to 4 images). Player cards use it to show all three art views at once.
+ * Returns the embeds for one item; keep them together when paging.
+ */
+const withGallery = (embed, item) => {
+    const views = item.views ?? [];
+    if (views.length < 2) return [embed];
+    embed.setURL(views[0]).setThumbnail(null).setImage(views[0]);
+    return [embed, ...views.slice(1, 4).map((view) => new EmbedBuilder().setURL(views[0]).setImage(view))];
+};
+
+/** Split embed groups into messages of at most 10 embeds without splitting a group. */
+export const pageEmbeds = (groups, max = 10) => {
+    const pages = [];
+    let page = [];
+    for (const group of groups) {
+        if (page.length && page.length + group.length > max) {
+            pages.push(page);
+            page = [];
+        }
+        page.push(...group.slice(0, max));
+    }
+    if (page.length) pages.push(page);
+    return pages;
+};
+
+/** Alert embeds for wishlist hits, already paged into messages. */
 export const alertEmbeds = (hits, emojis) => {
     const vp = emojis.get("vp", "VP");
     const kc = emojis.get("kc", "KC");
-    const embeds = [];
+    const groups = [];
     for (const item of hits.daily) {
-        embeds.push(itemEmbed(item, emojis, ["⭐ Wishlisted skin in your **daily shop**", price(item.price, vp)]));
+        groups.push([itemEmbed(item, emojis, ["⭐ Wishlisted skin in your **daily shop**", price(item.price, vp)])]);
     }
     for (const item of hits.accessories) {
-        embeds.push(itemEmbed(item, emojis, [
+        groups.push(withGallery(itemEmbed(item, emojis, [
             `⭐ Wishlisted ${(KIND_LABEL[item.kind] ?? "item").toLowerCase()} in your **accessory store**`,
             item.quantity > 1 ? `x${item.quantity}` : null,
             price(item.price, kc),
-        ]));
+        ]), item));
     }
     for (const item of hits.nightMarket) {
-        embeds.push(itemEmbed(item, emojis, [
+        groups.push([itemEmbed(item, emojis, [
             "⭐ Wishlisted skin in your **night market**",
             `~~${price(item.basePrice, vp)}~~ → **${price(item.price, vp)}** (-${item.discountPercent}%)`,
-        ]));
+        ])]);
     }
-    return embeds.slice(0, 10);
+    return pageEmbeds(groups);
 };
 
-/** Card for a wishlist entry. `large` shows the picture full-width (used when adding). */
-export const wishlistItemEmbed = (item, emojis, { large = false, note = null } = {}) => {
+/**
+ * Embeds for a wishlist entry. `large` shows the picture full-width, and for
+ * player cards a gallery of the small, wide and large art (used when adding).
+ */
+export const wishlistItemEmbeds = (item, emojis, { large = false, note = null } = {}) => {
     const embed = itemEmbed(item, emojis, [KIND_LABEL[item.kind] ?? "Item", note]);
-    if (large && item.icon) embed.setThumbnail(null).setImage(item.icon);
-    return embed;
+    if (!large) return [embed];
+    if (item.views?.length > 1) return withGallery(embed, item);
+    if (item.icon) embed.setThumbnail(null).setImage(item.icon);
+    return [embed];
 };

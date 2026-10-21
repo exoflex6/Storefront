@@ -4,7 +4,7 @@ import {
     MessageFlags,
     SlashCommandBuilder,
 } from "discord.js";
-import { accessoryEmbeds, bundleEmbeds, dailyEmbeds, nightMarketEmbeds, wishlistItemEmbed } from "./embeds.js";
+import { accessoryEmbeds, bundleEmbeds, dailyEmbeds, nightMarketEmbeds, pageEmbeds, wishlistItemEmbeds } from "./embeds.js";
 import { describeError } from "../errors.js";
 
 // Every command must be installable on both guilds and user accounts and usable
@@ -73,8 +73,7 @@ export const createHandlers = ({ store, shops, catalog, emojis, ownerId }) => {
             const items = store.state.wishlist.map((uuid) => catalog.item(uuid));
             if (!items.length) return interaction.reply({ content: "Your wishlist is empty - add items with `/wishlist add`.", ...ephemeral });
             // Discord caps a message at 10 embeds, so longer lists go out as follow-ups.
-            const pages = [];
-            for (let i = 0; i < items.length; i += 10) pages.push(items.slice(i, i + 10).map((item) => wishlistItemEmbed(item, emojis)));
+            const pages = pageEmbeds(items.map((item) => wishlistItemEmbeds(item, emojis)));
             await interaction.reply({ content: `**Wishlist** (${items.length})`, embeds: pages[0], ...ephemeral });
             for (const embeds of pages.slice(1)) await interaction.followUp({ embeds, ...ephemeral });
             return;
@@ -93,12 +92,12 @@ export const createHandlers = ({ store, shops, catalog, emojis, ownerId }) => {
                 return interaction.reply({ content: `**${item.name}** is already on your wishlist.`, ...ephemeral });
             }
             store.update((s) => { s.wishlist.push(item.uuid); });
-            const embed = wishlistItemEmbed(item, emojis, { large: true, note: "You'll get a DM when it shows up in your shop." });
-            return interaction.reply({ content: "Added to your wishlist:", embeds: [embed], ...ephemeral });
+            const embeds = wishlistItemEmbeds(item, emojis, { large: true, note: "You'll get a DM when it shows up in your shop." });
+            return interaction.reply({ content: "Added to your wishlist:", embeds, ...ephemeral });
         }
 
         store.update((s) => { s.wishlist = s.wishlist.filter((uuid) => uuid !== item.uuid); });
-        return interaction.reply({ content: "Removed from your wishlist:", embeds: [wishlistItemEmbed(item, emojis)], ...ephemeral });
+        return interaction.reply({ content: "Removed from your wishlist:", embeds: wishlistItemEmbeds(item, emojis), ...ephemeral });
     };
 
     const handleStatus = async (interaction) => {

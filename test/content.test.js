@@ -14,7 +14,7 @@ const data = {
         { uuid: "spray-1", displayName: "Prime Spray", isNullSpray: false, fullTransparentIcon: "https://img/spray.png", levels: [{ uuid: "spray-1-l1" }] },
         { uuid: "spray-null", displayName: "", isNullSpray: true, levels: [] },
     ],
-    playercards: [{ uuid: "card-1", displayName: "Prime Card", largeArt: "https://img/card.png" }],
+    playercards: [{ uuid: "card-1", displayName: "Prime Card", smallArt: "https://img/small.png", wideArt: "https://img/wide.png", largeArt: "https://img/large.png" }],
     playertitles: [{ uuid: "title-1", displayName: "Prime Title", titleText: "Primed" }, { uuid: "title-empty", displayName: null, titleText: null }],
     flex: [{ uuid: "flex-1", displayName: "Prime Totem", displayIcon: null }],
     bundles: [{ uuid: "bundle-1", displayName: "Prime", displayIcon: null }],
@@ -40,6 +40,7 @@ test("level UUIDs resolve to the parent item's wishlist key", async (t) => {
     assert.equal(catalog.wishlistKeyFor("card-1"), "card-1");
     assert.equal(catalog.wishlistKeyFor("nope"), null);
     assert.equal(catalog.item("skin-1-l1").icon, "https://img/skin.png");
+    assert.deepEqual(catalog.item("card-1").views, ["https://img/large.png", "https://img/wide.png", "https://img/small.png"]);
 });
 
 test("search covers skins and accessories, skipping unsellable items", async (t) => {
