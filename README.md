@@ -13,7 +13,7 @@ It replaces [SkinPeek](https://github.com/giorgi-o/SkinPeek), which was archived
   Adding an item shows its picture; `/wishlist list` shows a card with a picture for each item. Titles have no picture in-game.
   Player cards show all three art views (large, wide and small) when you add one and in alerts.
 - `/autopost`: choose which sections get DMed to you in full whenever they reset.
-  The daily shop resets every day, accessories every week, the night market when it opens, and bundles when they change. All four are on by default.
+  The daily shop is posted every day and accessories every week, even if the items repeat. The night market is posted when it opens and bundles when they change. All four are on by default.
   Run it with no options to see your settings, or e.g. `/autopost section:Bundles enabled:false`.
 - `/status`: Riot auth status and the next reset times
 
@@ -39,7 +39,8 @@ Your cookie goes to Riot and nowhere else. The only other outside service is val
 6. **Reset times** come from the `...RemainingDurationInSeconds` fields in the response.
    The scheduler re-arms itself for the next reset of any section (plus 90 seconds).
    After each reset it DMs you the sections that changed (per `/autopost`) and a separate alert for any wishlist hits.
-   It records which shop it alerted on, so a restart doesn't send the same alert again.
+   Wishlist alerts follow the same schedule: a wishlisted skin in your daily shop alerts every day it's there, and a wishlisted accessory every week it's there.
+   It records which rotation (reset time plus items) it alerted on, so a restart doesn't send the same alert again.
 
 ## Setup
 

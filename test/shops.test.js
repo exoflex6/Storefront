@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { ShopService } from "../src/shops.js";
 import { Store } from "../src/store.js";
+import { offerKey } from "../src/shop.js";
 import { AuthError } from "../src/riot/auth.js";
 import { Emojis } from "../src/discord/embeds.js";
 import { fakeCatalog, storefront, SKIN_B, SKIN_NM, BUDDY } from "./fixtures.js";
@@ -55,6 +56,63 @@ test("accessory wishlist hits alert once per rotation", async (t) => {
     raw.SkinsPanelLayout.SingleItemStoreOffers.pop();
     await service.start();
     assert.equal(sent.length, 1);
+});
+
+test("wishlist hits re-alert every new day/week even if the shop repeats", async (t) => {
+    let raw = storefront({ nightMarket: false });
+    const { service, store, sent } = setup({ storefrontImpl: async () => raw });
+    t.after(() => service.stop());
+    store.update((s) => { s.wishlist = [SKIN_B.skin, BUDDY.buddy]; });
+
+    await service.start();
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].embeds.length, 2);
+
+    // Next day, identical daily shop: alert on the daily hit again, not the accessory.
+    raw = structuredClone(raw);
+    raw.SkinsPanelLayout.SingleItemOffersRemainingDurationInSeconds += 86400;
+    await service.start();
+    assert.equal(sent.length, 2);
+    assert.equal(sent[1].embeds.length, 1);
+    assert.doesNotMatch(sent[1].embeds[0].toJSON().description, /accessory store/);
+
+    // Next week, identical accessories: the accessory hit alerts again.
+    raw = structuredClone(raw);
+    raw.AccessoryStore.AccessoryStoreRemainingDurationInSeconds += 7 * 86400;
+    await service.start();
+    assert.equal(sent.length, 3);
+    assert.match(sent[2].embeds[0].toJSON().description, /accessory store/);
+});
+
+test("auto-post sends the daily shop every day, even when it repeats", async (t) => {
+    let raw = storefront({ nightMarket: false });
+    const { service, sent } = setup({ storefrontImpl: async () => raw, autoPost: { ...ALL_OFF, daily: true } });
+    t.after(() => service.stop());
+    await service.start();
+    raw = structuredClone(raw);
+    raw.SkinsPanelLayout.SingleItemOffersRemainingDurationInSeconds += 86400;
+    await service.start();
+    assert.deepEqual(sent.map(titles), [
+        ["Today's shop", "Prime Vandal", "Reaver Sheriff"],
+        ["Today's shop", "Prime Vandal", "Reaver Sheriff"],
+    ]);
+});
+
+test("state saved with plain offer keys doesn't re-post after upgrading", async (t) => {
+    const { service, store, sent } = setup({ autoPost: { daily: true, accessories: true, nightMarket: true, bundles: true } });
+    t.after(() => service.stop());
+    const shop = await service.get({ fresh: true });
+    store.update((s) => {
+        s.lastAlerted = {
+            daily: offerKey(shop.daily.items),
+            accessories: offerKey(shop.accessories.items),
+            nightMarket: offerKey(shop.nightMarket.items),
+            bundles: offerKey(shop.bundles),
+        };
+    });
+    await service.start();
+    assert.equal(sent.length, 0);
+    assert.match(store.state.lastAlerted.daily, /\|/);
 });
 
 const titles = (message) => message.embeds.map((e) => e.toJSON().title);

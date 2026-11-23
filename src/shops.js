@@ -75,20 +75,28 @@ export class ShopService {
     async #checkAndAlert(shop) {
         const { lastAlerted, wishlist, autoPost } = this.store.state;
         const hits = findWishlistHits(shop, wishlist);
-        const sections = {
-            daily: shop.daily.items,
-            accessories: shop.accessories.items,
-            nightMarket: shop.nightMarket?.items ?? null,
-            bundles: shop.bundles.length ? shop.bundles : null,
+        // The daily shop, accessories and night market are keyed by rotation, so they're
+        // posted (and wishlist hits re-alerted) every day / every week even if the items repeat.
+        // Bundles have no fixed rotation, so they're posted whenever they change.
+        const keys = {
+            daily: rotationKey(shop.daily),
+            accessories: rotationKey(shop.accessories),
+            nightMarket: shop.nightMarket ? rotationKey(shop.nightMarket) : null,
+            bundles: shop.bundles.length ? offerKey(shop.bundles) : null,
         };
 
-        // Only post sections whose offers changed since the last check.
+        // Only post sections that reset since the last check.
         const changed = {};
-        for (const [name, items] of Object.entries(sections)) {
-            const key = items ? offerKey(items) : null;
-            if (key !== null && key !== lastAlerted[name]) changed[name] = key;
-            else if (name in hits) hits[name] = [];
+        const migrated = {};
+        for (const [name, key] of Object.entries(keys)) {
+            if (key !== null && key !== lastAlerted[name]) {
+                // State saved before rotation keys stored just the offer key: adopt the new key quietly.
+                if (name !== "bundles" && lastAlerted[name] === key.split("|")[1]) migrated[name] = key;
+                else changed[name] = key;
+            }
+            if (!(name in changed) && name in hits) hits[name] = [];
         }
+        if (Object.keys(migrated).length) this.store.update((s) => { Object.assign(s.lastAlerted, migrated); });
         if (!Object.keys(changed).length) return;
 
         const messages = [];
@@ -123,3 +131,12 @@ export const nextReset = (shop) => Math.min(
     ...shop.bundles.map((bundle) => bundle.resetsAt ?? Infinity),
     shop.fetchedAt + MAX_DELAY_MS,
 );
+
+// Reset times are derived from "seconds remaining" at fetch time, so they drift by the request latency.
+const RESET_ROUNDING_MS = 5 * 60 * 1000;
+
+/** Identifies one rotation of a section: when it resets, plus what's in it. */
+export const rotationKey = (section) => {
+    const resetsAt = section.resetsAt == null ? "" : Math.round(section.resetsAt / RESET_ROUNDING_MS) * RESET_ROUNDING_MS;
+    return `${resetsAt}|${offerKey(section.items)}`;
+};
