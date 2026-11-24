@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from pathlib import Path
 
 import aiohttp
@@ -264,6 +265,19 @@ KIND_CHOICES = [app_commands.Choice(name=label, value=kind) for kind, label in K
 
 
 async def item_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+    started = time.perf_counter()
+    try:
+        choices = await _item_choices(interaction, current)
+    except Exception:
+        log.exception("autocomplete failed for user %s", interaction.user.id)
+        return []
+    log.info("autocomplete /wishlist %s for user %s: %d option(s) in %.0f ms",
+             interaction.command.name if interaction.command else "?", interaction.user.id,
+             len(choices), (time.perf_counter() - started) * 1000)
+    return choices
+
+
+async def _item_choices(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
     user = bot.store.get(interaction.user.id)
     if user is None:
         return []
