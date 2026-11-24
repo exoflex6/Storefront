@@ -60,7 +60,7 @@ The host conventions are in `/opt/bots/BOTS.md` on `botslxc`. The unit and direc
 2. Run `ssh botslxc -t '/opt/bots/newbot.sh storefront "Storefront Valorant shop bot"'` and paste the token when it asks. This creates `/opt/bots/storefront`, a venv owned by the `bots` user, the systemd unit and the web manager registry line.
 3. Run `./deploy.sh` from this repo to replace the scaffold with this code.
 
-**Updates:** commit, then run `./deploy.sh`. It rsyncs the code, which never touches `.env` or `users.json`, reinstalls requirements, restarts the bot and prints the log.
+**Updates:** commit, then run `./deploy.sh`. It copies the committed code over SSH, never touching `.env` or `users.json`, reinstalls requirements, restarts the bot and prints the log.
 
 **Checks on the host:**
 
