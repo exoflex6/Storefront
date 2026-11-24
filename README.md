@@ -12,7 +12,7 @@ It replaces [SkinPeek](https://github.com/giorgi-o/SkinPeek), which was archived
 | `/unregister` | Delete your cookie, wishlist and settings, after you confirm. |
 | `/shop` `/accessories` `/nightmarket` `/bundle` | One section of your shop. Add `share:true` to post it for everyone. |
 | `/store` | All four sections at once. |
-| `/wishlist add` / `remove` / `list` | Skins, buddies, sprays, cards, titles and flex items, with pictures. Player cards show all three art views. |
+| `/wishlist add` / `remove` / `list` | `add` takes a required `type` first, then the `item` (suggestions are limited to that type). Covers skins, buddies, sprays, cards, titles and flex items, with pictures. Player cards show all three art views. |
 | `/autopost` | Choose which sections get DMed to you when they reset. |
 | `/status` | Shows your Riot login, shard and next reset times. |
 | `/ping` | Checks the bot is alive. |

@@ -286,7 +286,7 @@ async def item_autocomplete(interaction: discord.Interaction, current: str) -> l
 
 def find_item(pool, value: str, kind: str | None = None):
     for item in pool:
-        if item.uuid == value:
+        if item.uuid == value and (not kind or item.kind == kind):
             return item
     wanted = value.strip().casefold()
     for item in pool:
@@ -296,18 +296,18 @@ def find_item(pool, value: str, kind: str | None = None):
 
 
 @wishlist.command(name="add", description="Add a skin or accessory to your wishlist")
-@app_commands.describe(item="Item name", type="Only suggest this kind of item")
+@app_commands.describe(type="What kind of item (pick this first)", item="Item name")
 @app_commands.choices(type=KIND_CHOICES)
 @app_commands.autocomplete(item=item_autocomplete)
-async def wishlist_add(interaction: discord.Interaction, item: str, type: app_commands.Choice[str] | None = None) -> None:
+async def wishlist_add(interaction: discord.Interaction, type: app_commands.Choice[str], item: str) -> None:
     user = await require_user(interaction)
     if user is None:
         return
     await interaction.response.defer(ephemeral=True, thinking=True)
     await bot.service.catalog.ensure_loaded()
-    found = find_item(bot.service.catalog.wishlistable, item, type.value if type else None)
+    found = find_item(bot.service.catalog.wishlistable, item, type.value)
     if not found:
-        await interaction.followup.send(f'Nothing matching "{item}". Pick one from the suggestions.', ephemeral=True)
+        await interaction.followup.send(f'No {type.name.lower()} matching "{item}". Pick one from the suggestions.', ephemeral=True)
         return
     if found.uuid in user["wishlist"]:
         await interaction.followup.send(f"**{found.name}** is already on your wishlist.", ephemeral=True)
