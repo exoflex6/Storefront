@@ -39,9 +39,6 @@ class FakeAPI:
             cookies={**cookies, "ssid": ssid},  # Riot would rotate it; keep it simple
         )
 
-    async def offers(self, session):
-        return {"Offers": []}
-
     async def storefront(self, session):
         ssid = session.access_token.removeprefix("at-")
         if ssid in self.dead:

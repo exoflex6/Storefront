@@ -23,6 +23,7 @@ def skin(s, tier=TIER_PREMIUM):
     }
 
 
+LIMITED_SKIN = {"uuid": "skin-champ", "level": "skin-champ-lvl1", "name": "Champions 2021 Vandal"}
 BP_SKIN = {"uuid": "skin-bp", "level": "skin-bp-lvl1", "name": "Ion Classic BP"}  # battle pass reward, tiered
 AGENT_SPRAY = {"uuid": "spray-agent", "level": "spray-agent-lvl1", "name": "Agent Spray"}  # agent contract reward
 PASS_SPRAY = {"uuid": "spray-pass", "level": "spray-pass-lvl1", "name": "Pass Spray"}
@@ -38,7 +39,7 @@ def fake_catalog(state_path=None) -> Catalog:
     catalog = Catalog(http=None, state_path=state_path)
     catalog.load(
         tiers=[{"uuid": TIER_PREMIUM, "devName": "Premium", "highlightColor": "d1548dff", "displayIcon": None}],
-        skins=[skin(SKIN_A), skin(SKIN_B), skin(SKIN_NM), skin(BP_SKIN),
+        skins=[skin(SKIN_A), skin(SKIN_B), skin(SKIN_NM), skin(BP_SKIN), skin(LIMITED_SKIN),
                {"uuid": "default", "displayName": "Standard Vandal", "contentTierUuid": None, "levels": []}],
         buddies=[{"uuid": BUDDY["uuid"], "displayName": BUDDY["name"], "displayIcon": "https://img/buddy.png",
                   "levels": [{"uuid": BUDDY["level"]}]}],

@@ -27,8 +27,6 @@ MAX_DELAY = 24 * 60 * 60
 # Space out scheduled checks so many users resetting at once don't hammer Riot's login.
 CHECK_SPACING = 2
 TICK = 30
-# Riot's list of sellable skins changes only when new skins ship.
-OFFERS_TTL = 24 * 60 * 60
 
 REFRESH_HINT = "Run `/register` to add a fresh cookie."
 
@@ -56,7 +54,6 @@ class ShopService:
         self.accounts: dict[str, RiotAccount] = {}
         self.cache: dict[str, Shop] = {}
         self.next_check: dict[str, float] = {}
-        self._offers_task: asyncio.Task | None = None
 
     # --- accounts ------------------------------------------------------------
 
@@ -136,20 +133,11 @@ class ShopService:
         self.cache[uid] = shop
         self.catalog.note_seen(o.item for section in (shop.daily, shop.accessories, shop.night_market)
                                if section for o in section.offers)
-        if time.time() - self.catalog.store_skins_at > OFFERS_TTL and not (self._offers_task and not self._offers_task.done()):
-            self._offers_task = asyncio.create_task(self._refresh_offers(uid))
         user = self.users.get(uid)
         if user and user["auth_dead"]:
             user["auth_dead"] = False
             self.users.save()
         return shop
-
-    async def _refresh_offers(self, uid: str) -> None:
-        """Refresh which skins can rotate into shops, using this user's (already live) login."""
-        try:
-            self.catalog.set_store_offers(await self.account(uid).offers())
-        except Exception as exc:
-            log.warning("could not refresh the store offer list: %s", exc)
 
     async def _cookie_died(self, uid: str, err: AuthError) -> None:
         """Tell the user once per dead cookie rather than failing silently."""

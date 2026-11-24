@@ -41,8 +41,14 @@ ACCESSORY_KINDS = {"buddy", "spray", "card", "title", "flex"}
 # ("Season") and event passes ("Event"). Agent contract rewards are always earnable
 # from the agent, so they aren't sold.
 PASS_TYPES = {"Season", "Event"}
-# Riot's store offer list should hold hundreds of skins; anything smaller is a bad response.
-MIN_STORE_SKINS = 100
+# Limited releases that are sold once and never rotate back into shops. Riot's list of
+# sellable items (/store/v1/offers) used to say this directly but now returns 404.
+LIMITED_SKIN_PREFIXES = (
+    "Champions 20",  # yearly Champions event bundles
+    "VCT ",  # VCT team capsules and LOCK//IN
+    "Arcane ",  # Arcane collaboration
+    "Ignite Fan",  # Ignition event
+)
 
 
 @dataclass(frozen=True)
@@ -92,8 +98,6 @@ class Catalog:
         # Which items can actually show up in a shop (see can_rotate).
         self.pass_items: set[str] = set()   # accessories from past battle/event passes
         self.contract_skins: set[str] = set()  # skins earned from any contract, never sold
-        self.store_skins: set[str] | None = None  # skins in Riot's store offer list
-        self.store_skins_at = 0.0
         self.seen: set[str] = set()  # anything actually observed in someone's shop
         self.state_path = state_path
         self._load_state()
@@ -204,36 +208,18 @@ class Catalog:
     def can_rotate(self, item: Item) -> bool:
         """Whether an item can ever show up in the daily shop, night market or accessory store.
 
-        Skins: Riot's store offer list when we have it; otherwise any skin with a rarity
-        that isn't a battle pass/agent contract reward. Accessories: rewards from past
-        battle passes and event passes. Anything seen in a real shop always counts.
+        Skins: has a rarity, isn't a battle pass/agent contract reward, and isn't a limited
+        release. Accessories: rewards from past battle passes and event passes. Anything
+        seen in a real shop always counts.
         """
         if item.key in self.seen:
             return True
         if item.kind == "skin":
-            if self.store_skins is not None:
-                return item.key in self.store_skins
-            return item.tier is not None and item.key not in self.contract_skins
+            return (item.tier is not None and item.key not in self.contract_skins
+                    and not item.name.startswith(LIMITED_SKIN_PREFIXES))
         if item.kind in ACCESSORY_KINDS:
             return item.key in self.pass_items
         return False
-
-    def set_store_offers(self, raw: dict) -> int:
-        """Record which skins Riot sells, from GET /store/v1/offers. Returns how many."""
-        skins = set()
-        for offer in raw.get("Offers") or []:
-            for reward in offer.get("Rewards") or []:
-                item = self.items.get(reward.get("ItemID") or "")
-                if item and item.kind == "skin":
-                    skins.add(item.key)
-        if len(skins) < MIN_STORE_SKINS:
-            log.warning("store offer list had only %d skins; ignoring it", len(skins))
-            return 0
-        self.store_skins = skins
-        self.store_skins_at = time.time()
-        self._save_state()
-        log.info("store offers: %d skins can rotate into the shop", len(skins))
-        return len(skins)
 
     def note_seen(self, items) -> None:
         """Items seen in a real shop can rotate, whatever the lists above say."""
@@ -250,19 +236,12 @@ class Catalog:
         except (OSError, ValueError) as exc:
             log.warning("could not read %s (%s); starting fresh", self.state_path.name, exc)
             return
-        if state.get("store_skins"):
-            self.store_skins = set(state["store_skins"])
-            self.store_skins_at = state.get("store_skins_at", 0.0)
         self.seen = set(state.get("seen") or [])
 
     def _save_state(self) -> None:
         if not self.state_path:
             return
-        state = {
-            "store_skins": sorted(self.store_skins) if self.store_skins is not None else None,
-            "store_skins_at": self.store_skins_at,
-            "seen": sorted(self.seen),
-        }
+        state = {"seen": sorted(self.seen)}
         fd, tmp = tempfile.mkstemp(prefix=".rotation-", dir=self.state_path.parent)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:

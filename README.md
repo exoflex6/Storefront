@@ -96,8 +96,6 @@ Never run the same Discord token in two places. Stop the host's copy before runn
 
 Only items that can actually show up in a shop are suggested and accepted:
 
-- **Skins:** those in Riot's store offer list (`GET /store/v1/offers`), refreshed daily using a registered user's login. Battle pass, agent contract, limited event skins such as Champions, and default skins aren't in it. Until the list has been fetched once, the bot accepts any skin that has a rarity and isn't a contract reward.
+- **Skins:** any skin with a rarity, except battle pass and agent contract rewards and limited releases that never rotate back: Champions, VCT capsules and LOCK//IN, Arcane, and the Ignite Fan (`LIMITED_SKIN_PREFIXES` in `catalog.py`). Riot's list of sellable items (`/store/v1/offers`) used to answer this directly, but it now returns 404.
 - **Accessories** (buddies, sprays, cards, titles, flex): rewards from past battle passes and event passes, which is what the accessory store rotates. Agent contract rewards are excluded because they're always earnable from the agent.
-- **Anything seen in a real shop** always counts, in case the lists above miss something.
-
-This is kept in `rotation.json` beside the code.
+- **Anything seen in a real shop** always counts, in case the rules above miss something. These items are remembered in `rotation.json` beside the code.

@@ -9,7 +9,7 @@ from shop import SECTIONS, next_reset, parse_storefront, rotation_key, wishlist_
 import tempfile
 from pathlib import Path
 
-from tests.fixtures import AGENT_SPRAY, BP_SKIN, BUDDY, CARD, PASS_SPRAY, SKIN_A, SKIN_B, SKIN_NM, fake_catalog, storefront
+from tests.fixtures import AGENT_SPRAY, BP_SKIN, LIMITED_SKIN, BUDDY, CARD, PASS_SPRAY, SKIN_A, SKIN_B, SKIN_NM, fake_catalog, storefront
 
 NOW = 1_800_000_000
 
@@ -95,24 +95,14 @@ class Rotation(unittest.TestCase):
         self.catalog = fake_catalog()
         self.can = lambda uuid: self.catalog.can_rotate(self.catalog.item(uuid))
 
-    def test_without_riot_offer_list(self):
+    def test_rotation_rules(self):
         self.assertTrue(self.can(SKIN_A["uuid"]))  # store skin with a rarity
         self.assertFalse(self.can(BP_SKIN["uuid"]))  # battle pass reward
+        self.assertFalse(self.can(LIMITED_SKIN["uuid"]))  # limited release (Champions)
         self.assertFalse(self.can("default"))  # default skin
         self.assertTrue(self.can(BUDDY["uuid"]))  # past battle pass accessory
         self.assertTrue(self.can(PASS_SPRAY["uuid"]))  # event pass accessory
         self.assertFalse(self.can(AGENT_SPRAY["uuid"]))  # agent contract: always earnable, never sold
-
-    def test_riot_offer_list_decides_skins(self):
-        offers = {"Offers": [{"Rewards": [{"ItemID": SKIN_A["level"]}]}]}
-        with unittest.mock.patch("catalog.MIN_STORE_SKINS", 1):
-            self.assertEqual(self.catalog.set_store_offers(offers), 1)
-        self.assertTrue(self.can(SKIN_A["uuid"]))
-        self.assertFalse(self.can(SKIN_B["uuid"]))  # not sold anymore
-
-    def test_tiny_offer_list_is_ignored(self):
-        self.assertEqual(self.catalog.set_store_offers({"Offers": [{"Rewards": [{"ItemID": SKIN_A["level"]}]}]}), 0)
-        self.assertIsNone(self.catalog.store_skins)
 
     def test_seen_in_a_real_shop_always_counts(self):
         self.catalog.note_seen([self.catalog.item(AGENT_SPRAY["level"])])
@@ -124,16 +114,12 @@ class Rotation(unittest.TestCase):
         self.assertNotIn(AGENT_SPRAY["name"], names)
         self.assertIn(PASS_SPRAY["name"], names)
 
-    def test_state_survives_restart(self):
+    def test_seen_items_survive_restart(self):
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "rotation.json"
             first = fake_catalog(path)
-            first.note_seen([first.item(AGENT_SPRAY["level"])])
-            with unittest.mock.patch("catalog.MIN_STORE_SKINS", 1):
-                first.set_store_offers({"Offers": [{"Rewards": [{"ItemID": SKIN_A["level"]}]}]})
-            second = fake_catalog(path)
-            self.assertEqual(second.store_skins, {SKIN_A["uuid"]})
-            self.assertIn(AGENT_SPRAY["uuid"], second.seen)
+            first.note_seen([first.item(LIMITED_SKIN["level"])])
+            self.assertTrue(fake_catalog(path).can_rotate(first.item(LIMITED_SKIN["uuid"])))
 
 
 class Embeds(unittest.TestCase):
