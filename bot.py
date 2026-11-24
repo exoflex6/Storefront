@@ -35,6 +35,8 @@ log = logging.getLogger("storefront")
 
 HERE = Path(__file__).resolve().parent
 USERS_FILE = Path(os.getenv("USERS_FILE") or HERE / "users.json")
+# Which items can rotate into shops (Riot's offer list plus items seen in real shops).
+ROTATION_FILE = USERS_FILE.with_name("rotation.json")
 # Optional comma-separated Discord user IDs allowed to register. Empty: anyone.
 ALLOWED_USERS = {u.strip() for u in os.getenv("ALLOWED_USERS", "").split(",") if u.strip()}
 
@@ -75,7 +77,7 @@ class Bot(discord.Client):
         # No cookie jar: every Riot request carries exactly one user's cookies.
         self.http_session = aiohttp.ClientSession(cookie_jar=aiohttp.DummyCookieJar())
         api = RiotAPI(self.http_session)
-        catalog = Catalog(self.http_session)
+        catalog = Catalog(self.http_session, ROTATION_FILE)
         self.service = ShopService(api, catalog, self.store, self.app_emojis, self.dm)
         await self.app_emojis.load(self)
         try:
@@ -327,6 +329,11 @@ async def wishlist_add(interaction: discord.Interaction, type: app_commands.Choi
     found = find_item(bot.service.catalog.wishlistable, item, type.value)
     if not found:
         await interaction.followup.send(f'No {type.name.lower()} matching "{item}". Pick one from the suggestions.', ephemeral=True)
+        return
+    if not bot.service.catalog.can_rotate(found):
+        await interaction.followup.send(
+            f"**{found.name}** can't show up in your shop (it's only from a battle pass, agent contract or "
+            "event, or isn't sold anymore), so there's nothing to alert you about.", ephemeral=True)
         return
     if found.uuid in user["wishlist"]:
         await interaction.followup.send(f"**{found.name}** is already on your wishlist.", ephemeral=True)

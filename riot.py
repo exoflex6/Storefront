@@ -224,6 +224,23 @@ class RiotAPI:
             return res.status, None, text
 
 
+    async def offers(self, session: Session) -> dict:
+        """Every item Riot sells for VP (GET /store/v1/offers). Same for all accounts on a shard."""
+        async with self.http.get(
+            f"https://pd.{session.shard}.a.pvp.net/store/v1/offers/",
+            headers={
+                "Authorization": f"Bearer {session.access_token}",
+                "X-Riot-Entitlements-JWT": session.entitlements_token,
+                "X-Riot-ClientVersion": await self.client_version(),
+                "X-Riot-ClientPlatform": CLIENT_PLATFORM,
+            },
+            timeout=TIMEOUT,
+        ) as res:
+            if res.status != 200:
+                raise RuntimeError(f"store offers request failed ({res.status})")
+            return await res.json(content_type=None)
+
+
 class RiotAccount:
     """One registered user's Riot login. Re-auths with their cookies when needed.
 
@@ -263,3 +280,6 @@ class RiotAccount:
         if status != 200 or body is None:
             raise RuntimeError(f"storefront request failed ({status}): {text[:200]}")
         return body
+
+    async def offers(self) -> dict:
+        return await self.api.offers(await self.auth())

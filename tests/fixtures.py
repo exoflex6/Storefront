@@ -23,20 +23,37 @@ def skin(s, tier=TIER_PREMIUM):
     }
 
 
-def fake_catalog() -> Catalog:
-    catalog = Catalog(http=None)
+BP_SKIN = {"uuid": "skin-bp", "level": "skin-bp-lvl1", "name": "Ion Classic BP"}  # battle pass reward, tiered
+AGENT_SPRAY = {"uuid": "spray-agent", "level": "spray-agent-lvl1", "name": "Agent Spray"}  # agent contract reward
+PASS_SPRAY = {"uuid": "spray-pass", "level": "spray-pass-lvl1", "name": "Pass Spray"}
+
+
+def contract(relation, *uuids, name="Episode 1 Act 1"):
+    return {"displayName": name, "content": {"relationType": relation, "chapters": [
+        {"levels": [{"reward": {"type": "x", "uuid": u}} for u in uuids], "freeRewards": None},
+    ]}}
+
+
+def fake_catalog(state_path=None) -> Catalog:
+    catalog = Catalog(http=None, state_path=state_path)
     catalog.load(
         tiers=[{"uuid": TIER_PREMIUM, "devName": "Premium", "highlightColor": "d1548dff", "displayIcon": None}],
-        skins=[skin(SKIN_A), skin(SKIN_B), skin(SKIN_NM),
+        skins=[skin(SKIN_A), skin(SKIN_B), skin(SKIN_NM), skin(BP_SKIN),
                {"uuid": "default", "displayName": "Standard Vandal", "contentTierUuid": None, "levels": []}],
         buddies=[{"uuid": BUDDY["uuid"], "displayName": BUDDY["name"], "displayIcon": "https://img/buddy.png",
                   "levels": [{"uuid": BUDDY["level"]}]}],
-        sprays=[],
+        sprays=[{"uuid": sp["uuid"], "displayName": sp["name"], "displayIcon": None, "levels": [{"uuid": sp["level"]}]}
+                for sp in (AGENT_SPRAY, PASS_SPRAY)],
         cards=[{"uuid": CARD["uuid"], "displayName": CARD["name"], "displayIcon": "https://img/c.png",
                 "largeArt": "https://img/c-large.png", "wideArt": "https://img/c-wide.png", "smallArt": "https://img/c-small.png"}],
         titles=[{"uuid": "title-1", "displayName": "Primed Title", "titleText": "Primed"}],
         flex=[],
         bundles=[{"uuid": BUNDLE["uuid"], "displayName": BUNDLE["name"], "displayIcon": "https://img/bundle.png"}],
+        contracts=[
+            contract("Season", BUDDY["level"], CARD["uuid"], "title-1", BP_SKIN["level"]),
+            contract("Event", PASS_SPRAY["level"]),
+            contract("Agent", AGENT_SPRAY["level"]),
+        ],
     )
     return catalog
 

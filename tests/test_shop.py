@@ -1,11 +1,15 @@
 import base64
 import json
 import unittest
+import unittest.mock
 
 from embeds import Emojis, Group, alert_groups, paginate, section_embeds, wishlist_item_embeds
 from riot import CLIENT_PLATFORM, merge_set_cookies, parse_cookie_input, parse_reauth_location, region_to_shard
 from shop import SECTIONS, next_reset, parse_storefront, rotation_key, wishlist_hits
-from tests.fixtures import BUDDY, CARD, SKIN_A, SKIN_B, SKIN_NM, fake_catalog, storefront
+import tempfile
+from pathlib import Path
+
+from tests.fixtures import AGENT_SPRAY, BP_SKIN, BUDDY, CARD, PASS_SPRAY, SKIN_A, SKIN_B, SKIN_NM, fake_catalog, storefront
 
 NOW = 1_800_000_000
 
@@ -84,6 +88,52 @@ class Parsing(unittest.TestCase):
         self.assertEqual(names[:2], ["Prime Vandal", "Primed"])  # prefix matches first
         self.assertNotIn("Standard Vandal", [i.name for i in self.catalog.search("vandal")])  # unsellable
         self.assertEqual([i.kind for i in self.catalog.search("oni", kind="card")], ["card"])
+
+
+class Rotation(unittest.TestCase):
+    def setUp(self):
+        self.catalog = fake_catalog()
+        self.can = lambda uuid: self.catalog.can_rotate(self.catalog.item(uuid))
+
+    def test_without_riot_offer_list(self):
+        self.assertTrue(self.can(SKIN_A["uuid"]))  # store skin with a rarity
+        self.assertFalse(self.can(BP_SKIN["uuid"]))  # battle pass reward
+        self.assertFalse(self.can("default"))  # default skin
+        self.assertTrue(self.can(BUDDY["uuid"]))  # past battle pass accessory
+        self.assertTrue(self.can(PASS_SPRAY["uuid"]))  # event pass accessory
+        self.assertFalse(self.can(AGENT_SPRAY["uuid"]))  # agent contract: always earnable, never sold
+
+    def test_riot_offer_list_decides_skins(self):
+        offers = {"Offers": [{"Rewards": [{"ItemID": SKIN_A["level"]}]}]}
+        with unittest.mock.patch("catalog.MIN_STORE_SKINS", 1):
+            self.assertEqual(self.catalog.set_store_offers(offers), 1)
+        self.assertTrue(self.can(SKIN_A["uuid"]))
+        self.assertFalse(self.can(SKIN_B["uuid"]))  # not sold anymore
+
+    def test_tiny_offer_list_is_ignored(self):
+        self.assertEqual(self.catalog.set_store_offers({"Offers": [{"Rewards": [{"ItemID": SKIN_A["level"]}]}]}), 0)
+        self.assertIsNone(self.catalog.store_skins)
+
+    def test_seen_in_a_real_shop_always_counts(self):
+        self.catalog.note_seen([self.catalog.item(AGENT_SPRAY["level"])])
+        self.assertTrue(self.can(AGENT_SPRAY["uuid"]))
+
+    def test_search_only_offers_rotatable_items(self):
+        names = [i.name for i in self.catalog.search("")]
+        self.assertNotIn(BP_SKIN["name"], names)
+        self.assertNotIn(AGENT_SPRAY["name"], names)
+        self.assertIn(PASS_SPRAY["name"], names)
+
+    def test_state_survives_restart(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "rotation.json"
+            first = fake_catalog(path)
+            first.note_seen([first.item(AGENT_SPRAY["level"])])
+            with unittest.mock.patch("catalog.MIN_STORE_SKINS", 1):
+                first.set_store_offers({"Offers": [{"Rewards": [{"ItemID": SKIN_A["level"]}]}]})
+            second = fake_catalog(path)
+            self.assertEqual(second.store_skins, {SKIN_A["uuid"]})
+            self.assertIn(AGENT_SPRAY["uuid"], second.seen)
 
 
 class Embeds(unittest.TestCase):

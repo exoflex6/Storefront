@@ -12,7 +12,7 @@ It replaces [SkinPeek](https://github.com/giorgi-o/SkinPeek), which was archived
 | `/unregister` | Delete your cookie, wishlist and settings, after you confirm. |
 | `/shop` `/accessories` `/nightmarket` `/bundle` | One section of your shop. Add `share:true` to post it for everyone. |
 | `/store` | All four sections at once. |
-| `/wishlist add` / `remove` / `list` | `add` takes a required `type` first, then the `item` (suggestions are limited to that type). Covers skins, buddies, sprays, cards, titles and flex items, with pictures. Player cards show all three art views. |
+| `/wishlist add` / `remove` / `list` | `add` takes a required `type` first, then the `item` (suggestions are limited to that type, and only list items that can actually rotate into a shop). Covers skins, buddies, sprays, cards, titles and flex items, with pictures. Player cards show all three art views. |
 | `/autopost` | Choose which sections get DMed to you when they reset. |
 | `/status` | Shows your Riot login, shard and next reset times. |
 | `/ping` | Checks the bot is alive. |
@@ -91,3 +91,13 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 
 Tests use fake Riot and Discord objects and need no token or cookie.
 Never run the same Discord token in two places. Stop the host's copy before running it locally.
+
+## What can be wishlisted
+
+Only items that can actually show up in a shop are suggested and accepted:
+
+- **Skins:** those in Riot's store offer list (`GET /store/v1/offers`), refreshed daily using a registered user's login. Battle pass, agent contract, limited event skins such as Champions, and default skins aren't in it. Until the list has been fetched once, the bot accepts any skin that has a rarity and isn't a contract reward.
+- **Accessories** (buddies, sprays, cards, titles, flex): rewards from past battle passes and event passes, which is what the accessory store rotates. Agent contract rewards are excluded because they're always earnable from the agent.
+- **Anything seen in a real shop** always counts, in case the lists above miss something.
+
+This is kept in `rotation.json` beside the code.
