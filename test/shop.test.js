@@ -191,3 +191,70 @@ test("/autopost toggles a section and shows settings", async () => {
     assert.match(replies[1], /Pick both/);
     assert.equal(state.autoPost.bundles, false);
 });
+
+const fakeInteraction = (overrides = {}) => {
+    const calls = [];
+    return {
+        calls,
+        interaction: {
+            deferred: false,
+            replied: false,
+            responded: false,
+            isAutocomplete: () => false,
+            isRepliable: () => true,
+            reply: async (o) => calls.push(["reply", o]),
+            editReply: async (o) => calls.push(["edit", o]),
+            followUp: async (o) => calls.push(["followUp", o]),
+            respond: async (o) => calls.push(["respond", o]),
+            ...overrides,
+        },
+    };
+};
+
+test("a crashing command still gets an error reply", async () => {
+    const { replyWithError } = await import("../src/discord/commands.js");
+    const err = new Error("valorant-api.com /buddies failed (502)");
+
+    let { interaction, calls } = fakeInteraction();
+    await replyWithError(interaction, err);
+    assert.equal(calls[0][0], "reply");
+    assert.match(calls[0][1].content, /Couldn't finish that command: valorant-api.com/);
+    assert.ok(calls[0][1].flags);
+
+    ({ interaction, calls } = fakeInteraction({ deferred: true }));
+    await replyWithError(interaction, err);
+    assert.equal(calls[0][0], "edit");
+
+    ({ interaction, calls } = fakeInteraction({ replied: true }));
+    await replyWithError(interaction, err);
+    assert.equal(calls[0][0], "followUp");
+
+    ({ interaction, calls } = fakeInteraction({ isAutocomplete: () => true }));
+    await replyWithError(interaction, err);
+    assert.deepEqual(calls, [["respond", []]]);
+});
+
+test("/status copes with missing reset times", async () => {
+    const { createHandlers } = await import("../src/discord/commands.js");
+    const { Emojis } = await import("../src/discord/embeds.js");
+    const shop = parseStorefront(storefront({ nightMarket: false }), fakeCatalog());
+    shop.daily.resetsAt = null;
+    shop.accessories.resetsAt = null;
+    const { interaction, calls } = fakeInteraction({
+        user: { id: "owner" },
+        commandName: "status",
+        isChatInputCommand: () => true,
+        deferReply: async () => {},
+    });
+    await createHandlers({
+        store: { state: { wishlist: [], autoPost: { daily: true, accessories: true, nightMarket: true, bundles: true } } },
+        shops: { get: async () => shop, riot: { session: { name: "Me#NA1", shard: "na" } } },
+        catalog: fakeCatalog(),
+        emojis: new Emojis(),
+        ownerId: "owner",
+    })(interaction);
+    const content = calls[0][1].content;
+    assert.match(content, /Daily shop resets at an unknown time/);
+    assert.match(content, /Accessories rotate at an unknown time/);
+    assert.doesNotMatch(content, /NaN/);
+});

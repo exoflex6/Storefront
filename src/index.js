@@ -5,7 +5,7 @@ import { RiotClient } from "./riot/client.js";
 import { Catalog } from "./content.js";
 import { ShopService } from "./shops.js";
 import { Emojis } from "./discord/embeds.js";
-import { createHandlers } from "./discord/commands.js";
+import { createHandlers, replyWithError } from "./discord/commands.js";
 
 const store = new Store(config.dataDir);
 store.seedCookies(config.riotCookieSeed);
@@ -36,6 +36,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await handle(interaction);
     } catch (err) {
         console.error(`[interaction] ${interaction.commandName ?? "?"}:`, err);
+        await replyWithError(interaction, err).catch((replyErr) => {
+            console.error(`[interaction] could not report the error: ${replyErr.message}`);
+        });
     }
 });
 

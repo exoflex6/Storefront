@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { ShopService } from "../src/shops.js";
+import { ShopService, pageGroups } from "../src/shops.js";
 import { Store } from "../src/store.js";
 import { offerKey } from "../src/shop.js";
 import { AuthError } from "../src/riot/auth.js";
@@ -203,4 +203,64 @@ test("state file is private", () => {
     const { store } = setup();
     store.save();
     if (process.platform !== "win32") assert.equal(fs.statSync(store.file).mode & 0o777, 0o600);
+});
+
+test("a DM that fails part-way only retries the sections that didn't arrive", async (t) => {
+    const { service, store, sent } = setup({ autoPost: { daily: true, accessories: true, nightMarket: true, bundles: true } });
+    t.after(() => service.stop());
+    store.update((s) => { s.wishlist = [SKIN_B.skin]; });
+
+    // Message 1 is the wishlist alert (daily); message 2 the full shop. Fail the second.
+    let calls = 0;
+    service.notify = async (msg) => {
+        calls += 1;
+        if (calls === 2) throw new Error("Cannot send messages to this user");
+        sent.push(msg);
+    };
+    await service.start();
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].content, "🔔 Wishlist alert!");
+    // Daily was in both messages, so it isn't marked as posted yet; nothing else is either.
+    assert.deepEqual(Object.values(store.state.lastAlerted), [null, null, null, null]);
+
+    // Next run: the alert goes again (its section wasn't fully delivered), plus the full shop.
+    service.notify = async (msg) => { sent.push(msg); };
+    await service.start();
+    assert.equal(sent.length, 3);
+    assert.ok(Object.values(store.state.lastAlerted).every(Boolean));
+});
+
+test("sections fully delivered before a failure aren't sent again", async (t) => {
+    const { service, store, sent } = setup({ autoPost: { daily: true, accessories: true, nightMarket: true, bundles: true } });
+    t.after(() => service.stop());
+    store.update((s) => { s.wishlist = [BUDDY.buddy]; }); // accessory hit only
+
+    // Fail the full-shop message, which comes after the alert.
+    let calls = 0;
+    service.notify = async (msg) => {
+        calls += 1;
+        if (calls === 2) throw new Error("boom");
+        sent.push(msg);
+    };
+    await service.start();
+    assert.equal(sent.length, 1);
+    // Accessories still appear in the failed full-shop message, so they stay pending.
+    assert.equal(store.state.lastAlerted.accessories, null);
+
+    // With auto-post off for accessories, its alert alone completes the section.
+    store.update((s) => { s.autoPost.accessories = false; });
+    calls = 0;
+    sent.length = 0;
+    await service.start();
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].content, "🔔 Wishlist alert!");
+    assert.ok(store.state.lastAlerted.accessories);
+    assert.equal(store.state.lastAlerted.daily, null);
+});
+
+test("pageGroups records which sections each message carries", () => {
+    const group = (section, n) => ({ section, embeds: Array.from({ length: n }, (_, i) => `${section}${i}`) });
+    const pages = pageGroups([group("daily", 5), group("accessories", 5), group("bundles", 2)]);
+    assert.deepEqual(pages.map((p) => p.embeds.length), [10, 2]);
+    assert.deepEqual(pages.map((p) => [...p.sections]), [["daily", "accessories"], ["bundles"]]);
 });

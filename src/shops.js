@@ -1,7 +1,7 @@
 import { parseStorefront, findWishlistHits, offerKey } from "./shop.js";
 import { AuthError } from "./riot/auth.js";
 import { REFRESH_INSTRUCTIONS, describeError } from "./errors.js";
-import { accessoryEmbeds, alertEmbeds, bundleEmbeds, dailyEmbeds, nightMarketEmbeds, pageEmbeds } from "./discord/embeds.js";
+import { accessoryEmbeds, alertGroups, bundleEmbeds, dailyEmbeds, nightMarketEmbeds } from "./discord/embeds.js";
 
 // Serve repeated /shop calls from cache, but never past a reset.
 const CACHE_MS = 5 * 60 * 1000;
@@ -99,29 +99,55 @@ export class ShopService {
         if (Object.keys(migrated).length) this.store.update((s) => { Object.assign(s.lastAlerted, migrated); });
         if (!Object.keys(changed).length) return;
 
-        const messages = [];
-        if (hits.daily.length || hits.accessories.length || hits.nightMarket.length) {
-            alertEmbeds(hits, this.emojis).forEach((embeds, i) => {
-                messages.push(i === 0 ? { content: "🔔 Wishlist alert!", embeds } : { embeds });
-            });
-        }
-
         const fullSections = {
             daily: () => dailyEmbeds(shop, this.emojis, { header: "Today's shop", wishlist }),
             accessories: () => accessoryEmbeds(shop, this.emojis, { wishlist }),
             nightMarket: () => nightMarketEmbeds(shop, this.emojis, { wishlist }),
             bundles: () => bundleEmbeds(shop, this.emojis),
         };
-        const posts = Object.keys(fullSections)
+        const alerts = pageGroups(alertGroups(hits, this.emojis));
+        const posts = pageGroups(Object.keys(fullSections)
             .filter((name) => name in changed && autoPost[name])
-            .map((name) => fullSections[name]());
-        for (const embeds of pageEmbeds(posts)) messages.push({ embeds });
+            .map((name) => ({ section: name, embeds: fullSections[name]() })));
+        const messages = [
+            ...alerts.map((page, i) => ({ ...page, payload: i === 0 ? { content: "🔔 Wishlist alert!", embeds: page.embeds } : { embeds: page.embeds } })),
+            ...posts.map((page) => ({ ...page, payload: { embeds: page.embeds } })),
+        ];
 
-        for (const message of messages) await this.notify(message);
-        // Only mark as posted once the DMs went out, so a failed DM is retried next run.
-        this.store.update((s) => { Object.assign(s.lastAlerted, changed); });
+        // A section counts as posted once the last message carrying it went out. If a DM
+        // fails part-way, only the sections not yet delivered are retried next run, so
+        // messages that already arrived aren't sent twice.
+        const lastMessage = {};
+        messages.forEach((message, i) => { for (const section of message.sections) lastMessage[section] = i; });
+        const markPosted = (names) => {
+            if (!names.length) return;
+            this.store.update((s) => { for (const name of names) s.lastAlerted[name] = changed[name]; });
+        };
+        markPosted(Object.keys(changed).filter((name) => !(name in lastMessage)));
+        for (const [i, message] of messages.entries()) {
+            await this.notify(message.payload);
+            markPosted(Object.keys(changed).filter((name) => lastMessage[name] === i));
+        }
     }
 }
+
+/**
+ * Page tagged embed groups ({section, embeds}) into messages of at most `max` embeds
+ * without splitting a group, keeping track of which sections each message carries.
+ */
+export const pageGroups = (groups, max = 10) => {
+    const pages = [];
+    let page = null;
+    for (const group of groups) {
+        if (!page || (page.embeds.length && page.embeds.length + group.embeds.length > max)) {
+            page = { embeds: [], sections: new Set() };
+            pages.push(page);
+        }
+        page.embeds.push(...group.embeds.slice(0, max));
+        page.sections.add(group.section);
+    }
+    return pages;
+};
 
 /** Earliest upcoming reset of any section (daily shop, accessories, night market, bundles). */
 export const nextReset = (shop) => Math.min(

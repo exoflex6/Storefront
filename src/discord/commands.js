@@ -23,6 +23,9 @@ const AUTO_POST_SECTIONS = { daily: "Daily shop", accessories: "Accessories", ni
 
 const shopCommand = (name, description) => everywhere(shareOption(new SlashCommandBuilder().setName(name).setDescription(description)));
 
+// Discord relative timestamp, or "at an unknown time" if Riot didn't send a countdown.
+const when = (ms) => (Number.isFinite(ms) ? `<t:${Math.floor(ms / 1000)}:R>` : "at an unknown time");
+
 const describeAutoPost = (autoPost) => {
     const on = Object.entries(AUTO_POST_SECTIONS).filter(([key]) => autoPost[key]).map(([, name]) => name.toLowerCase());
     return on.length ? on.join(", ") : "off";
@@ -54,6 +57,22 @@ export const commandDefinitions = [
         .setName("status")
         .setDescription("Riot auth status and next shop resets")),
 ].map((c) => c.toJSON());
+
+/**
+ * Last-resort reply when a handler throws, so Discord shows the error instead of
+ * "The application did not respond". Never includes tokens or cookies.
+ */
+export const replyWithError = async (interaction, err) => {
+    if (interaction.isAutocomplete()) {
+        if (!interaction.responded) await interaction.respond([]);
+        return;
+    }
+    if (!interaction.isRepliable()) return;
+    const content = `❌ ${describeError(err, { action: "finish that command" })}`;
+    if (interaction.deferred && !interaction.replied) return interaction.editReply({ content, embeds: [] });
+    if (interaction.replied) return interaction.followUp({ content, flags: MessageFlags.Ephemeral });
+    return interaction.reply({ content, flags: MessageFlags.Ephemeral });
+};
 
 /**
  * @param {{store: import("../store.js").Store, shops: import("../shops.js").ShopService, catalog: import("../content.js").Catalog, emojis: import("./embeds.js").Emojis, ownerId: string}} deps
@@ -129,9 +148,9 @@ export const createHandlers = ({ store, shops, catalog, emojis, ownerId }) => {
             const shop = await shops.get();
             const session = shops.riot.session;
             lines.push(`✅ Riot auth OK${session?.name ? ` as **${session.name}**` : ""} (shard \`${session?.shard}\`)`);
-            lines.push(`Daily shop resets <t:${Math.floor(shop.daily.resetsAt / 1000)}:R>`);
-            if (shop.accessories.resetsAt) lines.push(`Accessories rotate <t:${Math.floor(shop.accessories.resetsAt / 1000)}:R>`);
-            lines.push(shop.nightMarket ? `Night market closes <t:${Math.floor(shop.nightMarket.resetsAt / 1000)}:R>` : "Night market: closed");
+            lines.push(`Daily shop resets ${when(shop.daily.resetsAt)}`);
+            lines.push(`Accessories rotate ${when(shop.accessories.resetsAt)}`);
+            lines.push(shop.nightMarket ? `Night market closes ${when(shop.nightMarket.resetsAt)}` : "Night market: closed");
         } catch (err) {
             lines.push(`❌ ${describeError(err)}`);
         }

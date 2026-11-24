@@ -148,29 +148,32 @@ export const pageEmbeds = (groups, max = 10) => {
     return pages;
 };
 
-/** Alert embeds for wishlist hits, already paged into messages. */
-export const alertEmbeds = (hits, emojis) => {
+/** Alert embed groups for wishlist hits, one per item, tagged with the shop section it's in. */
+export const alertGroups = (hits, emojis) => {
     const vp = emojis.get("vp", "VP");
     const kc = emojis.get("kc", "KC");
     const groups = [];
     for (const item of hits.daily) {
-        groups.push([itemEmbed(item, emojis, ["⭐ Wishlisted skin in your **daily shop**", price(item.price, vp)])]);
+        groups.push({ section: "daily", embeds: [itemEmbed(item, emojis, ["⭐ Wishlisted skin in your **daily shop**", price(item.price, vp)])] });
     }
     for (const item of hits.accessories) {
-        groups.push(withGallery(itemEmbed(item, emojis, [
+        groups.push({ section: "accessories", embeds: withGallery(itemEmbed(item, emojis, [
             `⭐ Wishlisted ${(KIND_LABEL[item.kind] ?? "item").toLowerCase()} in your **accessory store**`,
             item.quantity > 1 ? `x${item.quantity}` : null,
             price(item.price, kc),
-        ]), item));
+        ]), item) });
     }
     for (const item of hits.nightMarket) {
-        groups.push([itemEmbed(item, emojis, [
+        groups.push({ section: "nightMarket", embeds: [itemEmbed(item, emojis, [
             "⭐ Wishlisted skin in your **night market**",
             `~~${price(item.basePrice, vp)}~~ → **${price(item.price, vp)}** (-${item.discountPercent}%)`,
-        ])]);
+        ])] });
     }
-    return pageEmbeds(groups);
+    return groups;
 };
+
+/** Alert embeds for wishlist hits, already paged into messages. */
+export const alertEmbeds = (hits, emojis) => pageEmbeds(alertGroups(hits, emojis).map((g) => g.embeds));
 
 /**
  * Embeds for a wishlist entry. `large` shows the picture full-width, and for
