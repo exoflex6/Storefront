@@ -1,8 +1,14 @@
-node_modules/
-# Secrets: Discord token, Riot ssid cookie
+# Secrets: Discord token
 .env
 .env.*
 !.env.example
-# Bot state, including rotated Riot cookies
-data/
+# Registered users, including their Riot cookies
+users.json
+.users-*
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.bak*
 *.log
