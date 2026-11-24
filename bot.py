@@ -99,6 +99,11 @@ class Bot(discord.Client):
         user = self.get_user(user_id) or await self.fetch_user(user_id)
         await user.send(**payload)
 
+    async def on_interaction(self, interaction: discord.Interaction) -> None:
+        data = interaction.data or {}
+        log.info("interaction %s /%s from user %s (%s)", interaction.type.name, data.get("name", "?"),
+                 interaction.user.id, "server" if interaction.guild_id else "DM/user app")
+
     async def on_ready(self) -> None:
         log.info("signed in as %s (%s)", self.user, self.user.id)
 
