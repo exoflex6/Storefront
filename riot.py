@@ -237,7 +237,7 @@ class RiotAPI:
             timeout=TIMEOUT,
         ) as res:
             if res.status != 200:
-                raise RuntimeError(f"store offers request failed ({res.status})")
+                raise RuntimeError(f"store offers request failed ({res.status}): {(await res.text())[:200]}")
             return await res.json(content_type=None)
 
 
