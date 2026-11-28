@@ -12,7 +12,7 @@ import discord
 
 from embeds import Emojis
 from riot import AuthError, Session
-from service import ShopService
+from service import KEEPALIVE, ShopService
 from users import UserStore
 from tests.fixtures import BUDDY, SKIN_B, fake_catalog, storefront
 
@@ -46,7 +46,7 @@ class FakeAPI:
         return 200, self.shops[ssid], ""
 
 
-class ServiceTest(unittest.IsolatedAsyncioTestCase):
+class ServiceBase(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
@@ -73,6 +73,7 @@ class ServiceTest(unittest.IsolatedAsyncioTestCase):
         self.api.shops[ssid] = json.loads(json.dumps(self.api.shops[ssid]))
         self.api.shops[ssid]["SkinsPanelLayout"]["SingleItemOffersRemainingDurationInSeconds"] += 86400 * days
 
+class ServiceTest(ServiceBase):
     async def test_register_stores_user_and_sends_nothing_yet(self):
         user, shop = await self.register(1, "alice", auto_post=ALL_ON)
         self.assertEqual(user["riot_name"], "alice#NA1")
@@ -181,6 +182,43 @@ class ServiceTest(unittest.IsolatedAsyncioTestCase):
         await self.register(1, "alice")
         mode = stat.S_IMODE(os.stat(Path(self.dir.name) / "users.json").st_mode)
         self.assertEqual(mode, 0o600)
+
+
+class KeepAlive(ServiceBase):
+    async def test_registering_records_the_login(self):
+        user, _ = await self.register(1, "alice")
+        self.assertAlmostEqual(user["last_login"], time.time(), delta=5)
+        self.assertFalse(self.service._needs_keep_alive(user, time.time()))
+
+    async def test_stale_login_gets_refreshed(self):
+        user, _ = await self.register(1, "alice")
+        user["last_login"] -= KEEPALIVE + 1
+        self.assertTrue(self.service._needs_keep_alive(user, time.time()))
+        logins = self.api.logins
+        await self.service.keep_alive(1)
+        self.assertEqual(self.api.logins, logins + 1)  # forced a fresh login despite a cached token
+        self.assertFalse(self.service._needs_keep_alive(user, time.time()))
+
+    async def test_dead_cookie_on_keep_alive_dms_once(self):
+        await self.register(1, "alice")
+        self.api.dead.add("alice")
+        await self.service.keep_alive(1)
+        await self.service.keep_alive(1)
+        self.assertEqual(len(self.sent), 1)
+        self.assertTrue(self.store.get(1)["auth_dead"])
+        self.assertFalse(self.service._needs_keep_alive(self.store.get(1), time.time() + KEEPALIVE * 2))
+
+    async def test_transient_failure_keeps_retrying(self):
+        user, _ = await self.register(1, "alice")
+        user["last_login"] -= KEEPALIVE + 1
+
+        async def down(cookies):
+            raise AuthError("Riot login is rate limiting this server (429)")
+
+        self.api.login = down
+        await self.service.keep_alive(1)
+        self.assertEqual(self.sent, [])
+        self.assertTrue(self.service._needs_keep_alive(user, time.time()))  # tried again next tick
 
 
 class RegistrationGate(unittest.IsolatedAsyncioTestCase):

@@ -27,6 +27,9 @@ MAX_DELAY = 24 * 60 * 60
 # Space out scheduled checks so many users resetting at once don't hammer Riot's login.
 CHECK_SPACING = 2
 TICK = 30
+# The ssid Riot hands back on each login stops working about 24h later (a login 24h00m18s
+# after the previous one was rejected; 23h59m49s was fine). Log in again well inside that.
+KEEPALIVE = 6 * 60 * 60
 
 REFRESH_HINT = "Run `/register` to add a fresh cookie."
 
@@ -67,6 +70,7 @@ class ShopService:
                 current = self.users.get(uid)
                 if current is not None:
                     current["cookies"] = cookies
+                    current["last_login"] = int(time.time())
                     self.users.save()
 
             self.accounts[uid] = RiotAccount(self.api, dict(user["cookies"]), save_cookies)
@@ -84,7 +88,7 @@ class ShopService:
         user = new_user(session.cookies)
         if previous:
             user.update(wishlist=previous["wishlist"], auto_post=previous["auto_post"], registered_at=previous["registered_at"])
-        user.update(riot_name=session.name, puuid=session.puuid, shard=session.shard)
+        user.update(riot_name=session.name, puuid=session.puuid, shard=session.shard, last_login=int(time.time()))
         self.users.put(uid, user)
 
         self.cache.pop(uid, None)
@@ -209,6 +213,23 @@ class ShopService:
                 return
             mark(name for name in changed if last_message.get(name) == i)
 
+    async def keep_alive(self, user_id: int | str) -> None:
+        """Log in again so Riot issues a fresh ssid before the current one expires."""
+        uid = str(user_id)
+        try:
+            await self.account(uid).auth(force=True)
+            log.info("user %s: keep-alive login OK", uid)
+        except AuthError as exc:
+            if exc.dead:
+                await self._cookie_died(uid, exc)
+            else:
+                log.warning("user %s: keep-alive login failed, will retry: %s", uid, exc)
+        except Exception as exc:
+            log.warning("user %s: keep-alive login failed, will retry: %s", uid, exc)
+
+    def _needs_keep_alive(self, user: dict, now: float) -> bool:
+        return not user["auth_dead"] and now - (user.get("last_login") or 0) >= KEEPALIVE
+
     async def run_scheduler(self) -> None:
         log.info("scheduler started")
         while True:
@@ -223,4 +244,10 @@ class ShopService:
                 self.next_check[uid] = await self.check(uid)
                 log.info("user %s: next check %s", uid, time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.next_check[uid])))
                 await asyncio.sleep(CHECK_SPACING)
+            # Between shop checks (up to a day apart), keep every login fresh.
+            for uid in self.users.ids():
+                user = self.users.get(uid)
+                if user is not None and self._needs_keep_alive(user, time.time()):
+                    await self.keep_alive(uid)
+                    await asyncio.sleep(CHECK_SPACING)
             await asyncio.sleep(TICK)

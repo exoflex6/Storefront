@@ -42,10 +42,10 @@ ALLOWED_USERS = {u.strip() for u in os.getenv("ALLOWED_USERS", "").split(",") if
 
 REGISTER_TEXT = f"""\
 **Add your Riot account**
-1. In a desktop browser, open [this Riot sign-in page]({REAUTH_URL}) and sign in with **Stay signed in** ticked. You'll end up on playvalorant.com.
+1. In a desktop browser, open a **private/incognito window**, go to [this Riot sign-in page]({REAUTH_URL}) and sign in with **Stay signed in** ticked. You'll end up on playvalorant.com.
 2. Press **F12** → **Application** (Chrome/Edge) or **Storage** (Firefox) → **Cookies** → `https://auth.riotgames.com`.
 3. Copy the value of the `ssid` cookie.
-4. Press **Add my cookie** below and paste it.
+4. Press **Add my cookie** below and paste it, then **close the private window without signing out**. Signing out of that session would log the bot out too.
 
 ⚠️ That cookie is full access to your Riot account, so only give it to a bot you trust. \
 It's kept on the bot's server and used only to read your shop. \

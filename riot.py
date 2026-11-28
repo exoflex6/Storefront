@@ -174,6 +174,10 @@ class RiotAPI:
             raise AuthError("Riot login blocked this server (403)")
         if not 300 <= status < 400:
             raise AuthError(f"unexpected Riot login status {status}")
+        for line in set_cookie:
+            if line.startswith("ssid="):
+                # Attributes only (Max-Age, Expires, ...), never the value.
+                log.info("Riot issued a new ssid: %s", "; ".join(a.strip() for a in line.split(";")[1:]) or "no attributes")
         tokens = parse_reauth_location(location)
         if not tokens:
             raise AuthError("cookie rejected - Riot asked to log in again", dead=True)

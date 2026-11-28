@@ -37,6 +37,9 @@ def new_user(cookies: dict[str, str]) -> dict:
         "auto_post": default_auto_post(),
         # Set once we've told the user their cookie died; cleared when they re-register.
         "auth_dead": False,
+        # Last successful Riot login. Riot's rotated ssid lasts about 24h, so the scheduler
+        # logs in again well before that (see service.KEEPALIVE).
+        "last_login": None,
     }
 
 
@@ -52,6 +55,7 @@ class UserStore:
                 user["last_posted"] = {**{n: None for n in SECTIONS}, **(user.get("last_posted") or {})}
                 user["auto_post"] = {**default_auto_post(), **(user.get("auto_post") or {})}
                 user.setdefault("auth_dead", False)
+                user.setdefault("last_login", None)
         log.info("%d registered user(s)", len(self.users))
 
     def save(self) -> None:

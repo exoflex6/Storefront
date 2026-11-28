@@ -27,13 +27,23 @@ All commands work in servers, in DMs with the bot and in group DMs. The app can 
 - **Reset posts:** your daily shop every day and your accessories every week, even when the items repeat. The night market (when it opens) and bundles (when they change) are off by default; turn them on with `/autopost`.
 - **Expired login:** when your cookie stops working you get one DM asking you to `/register` again. Scheduled checks pause until you do.
 
+### Staying logged in
+
+Riot hands back a new `ssid` on every login, and that one stops working about 24 hours later: a login 24h00m18s after the previous one was rejected, while 23h59m49s was fine. So the bot logs every user in again at least **every 6 hours** (`KEEPALIVE` in `service.py`), whether or not their shop has reset. The log records the attributes Riot sends with each new `ssid`, never its value.
+
+A login can still end early if you:
+
+- sign out of the browser session you copied the cookie from. That's why `/register` says to use a private window and close it without signing out.
+- change your password, use "sign out of all devices", or change 2FA.
+- get the session flagged by Riot.
+
 Registering doesn't DM you the current shop. The first automatic post comes at the next reset.
 
 ## How it works
 
 Everything goes through Riot's unofficial game-client API, not the official developer API, so it can break after a patch.
 
-1. **Cookie login:** `GET auth.riotgames.com/authorize?...` with the user's cookies. The access token comes back in the redirect fragment. A redirect to the login page means the cookie is dead. Riot rotates `ssid` on each login, and the bot saves the new one.
+1. **Cookie login:** `GET auth.riotgames.com/authorize?...` with the user's cookies. The access token comes back in the redirect fragment. A redirect to the login page means the cookie is dead. Riot rotates `ssid` on each login and the new one lasts about a day, so the bot saves it and logs in again every 6 hours.
 2. **Entitlements token**, **PUUID** from `/userinfo`, and **shard** from riot-geo.
 3. **Storefront:** `POST pd.{shard}.a.pvp.net/store/v3/storefront/{puuid}`. The client version comes from valorant-api.com, so it tracks game patches.
 4. **Item data:** names, pictures and rarity from [valorant-api.com](https://valorant-api.com), refreshed every 12h.
