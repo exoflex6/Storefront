@@ -28,15 +28,15 @@ class FakeAPI:
         self.dead = set()
         self.logins = 0
 
-    async def login(self, cookies):
+    async def login(self, auth):
         self.logins += 1
-        ssid = cookies.get("ssid")
+        ssid = auth.get("ssid") or auth.get("refresh_token")
         if not ssid or ssid in self.dead:
             raise AuthError("cookie rejected - Riot asked to log in again", dead=True)
         return Session(
             access_token=f"at-{ssid}", id_token="id", expires_at=time.time() + 3600,
             entitlements_token="ent", puuid=f"puuid-{ssid}", name=f"{ssid}#NA1", shard="na",
-            cookies={**cookies, "ssid": ssid},  # Riot would rotate it; keep it simple
+            auth=dict(auth),  # Riot would rotate it; keep it simple
         )
 
     async def storefront(self, session):
@@ -184,6 +184,19 @@ class ServiceTest(ServiceBase):
         self.assertEqual(mode, 0o600)
 
 
+class Storage(ServiceBase):
+    async def test_refresh_token_login_is_stored_and_reused(self):
+        self.api.shops["rt1"] = storefront()
+        user, _ = await self.service.register(1, {"refresh_token": "rt1"})
+        self.assertEqual(user["auth"], {"refresh_token": "rt1"})
+        self.assertNotIn("cookies", user)
+
+    def test_old_cookie_records_are_migrated(self):
+        path = Path(self.dir.name) / "old.json"
+        path.write_text(json.dumps({"1": {"cookies": {"ssid": "s"}, "wishlist": []}}))
+        self.assertEqual(UserStore(path).get(1)["auth"], {"ssid": "s"})
+
+
 class KeepAlive(ServiceBase):
     async def test_registering_records_the_login(self):
         user, _ = await self.register(1, "alice")
@@ -212,7 +225,7 @@ class KeepAlive(ServiceBase):
         user, _ = await self.register(1, "alice")
         user["last_login"] -= KEEPALIVE + 1
 
-        async def down(cookies):
+        async def down(auth):
             raise AuthError("Riot login is rate limiting this server (429)")
 
         self.api.login = down
@@ -242,11 +255,12 @@ class RegistrationGate(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await self.bot_module.require_user(interaction))
         content, kwargs = sent[0]
         self.assertIn("add your Riot account", content)
+        self.assertIn("localhost/redirect", kwargs["embed"].description)
         self.assertTrue(kwargs["ephemeral"])
         self.assertIsInstance(kwargs["view"], self.bot_module.RegisterView)
 
     async def test_registered_users_pass(self):
-        self.bot_module.bot.store.put(42, {"cookies": {"ssid": "x"}, "wishlist": []})
+        self.bot_module.bot.store.put(42, {"auth": {"ssid": "x"}, "wishlist": []})
         interaction, sent = self.interaction(42)
         self.assertIsNotNone(await self.bot_module.require_user(interaction))
         self.assertEqual(sent, [])

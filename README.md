@@ -8,8 +8,8 @@ It replaces [SkinPeek](https://github.com/giorgi-o/SkinPeek), which was archived
 
 | Command | What it does |
 |---|---|
-| `/register` | Add or refresh your Riot account. It shows how to copy your `ssid` cookie, then a button opens a private pop-up where you paste it. |
-| `/unregister` | Delete your cookie, wishlist and settings, after you confirm. |
+| `/register` | Add or refresh your Riot account. Press **Click here to log in**, sign in on Riot's page, then press **I've logged in - paste URL** and paste the address your browser lands on (an error page on `localhost` is normal). **Use a cookie instead** is a fallback that takes an `ssid` cookie. |
+| `/unregister` | Delete your Riot login, wishlist and settings, after you confirm. |
 | `/shop` `/accessories` `/nightmarket` `/bundle` | One section of your shop. Add `share:true` to post it for everyone. |
 | `/store` | All four sections at once. |
 | `/wishlist add` / `remove` / `list` | `add` takes a required `type` first, then the `item` (suggestions are limited to that type, and only list items that can actually rotate into a shop). Covers skins, buddies, sprays, cards, titles and flex items, with pictures. Player cards show all three art views. |
@@ -25,17 +25,21 @@ All commands work in servers, in DMs with the bot and in group DMs. The app can 
 
 - **Wishlist alerts:** sent when a wishlisted item appears, once per rotation.
 - **Reset posts:** your daily shop every day and your accessories every week, even when the items repeat. The night market (when it opens) and bundles (when they change) are off by default; turn them on with `/autopost`.
-- **Expired login:** when your cookie stops working you get one DM asking you to `/register` again. Scheduled checks pause until you do.
+- **Expired login:** when your login stops working you get one DM asking you to `/register` again. Scheduled checks pause until you do.
 
 ### Staying logged in
 
-Riot hands back a new `ssid` on every login, and that one stops working about 24 hours later: a login 24h00m18s after the previous one was rejected, while 23h59m49s was fine. So the bot logs every user in again at least **every 6 hours** (`KEEPALIVE` in `service.py`), whether or not their shop has reset. The log records the attributes Riot sends with each new `ssid`, never its value.
+**Link login (the default).** The login link is Riot's own sign-in page acting as the Riot Client (`client_id=riot-client`, `response_type=code`, scope `offline_access`). It ends on `http://localhost/redirect?code=...`. Nothing listens there, so the browser shows an error, but the address holds a one-time code. The bot trades that code at `auth.riotgames.com/token` for a **refresh token** and renews the login with it, so the login doesn't depend on any browser session. The code expires within about a minute, so paste it straight away.
+
+**Cookie login (fallback).** Riot hands back a new `ssid` on every login, and that one stops working about 24 hours later: a login 24h00m18s after the previous one was rejected, while 23h59m49s was fine. The log records the attributes Riot sends with each new `ssid`, never its value.
+
+Either way, the bot logs every user in again at least **every 6 hours** (`KEEPALIVE` in `service.py`) and saves whatever Riot hands back.
 
 A login can still end early if you:
 
-- sign out of the browser session you copied the cookie from. That's why `/register` says to use a private window and close it without signing out.
 - change your password, use "sign out of all devices", or change 2FA.
 - get the session flagged by Riot.
+- (cookie login only) sign out of the browser session you copied the cookie from. That's why the cookie steps say to use a private window and close it without signing out.
 
 Registering doesn't DM you the current shop. The first automatic post comes at the next reset.
 
@@ -43,20 +47,20 @@ Registering doesn't DM you the current shop. The first automatic post comes at t
 
 Everything goes through Riot's unofficial game-client API, not the official developer API, so it can break after a patch.
 
-1. **Cookie login:** `GET auth.riotgames.com/authorize?...` with the user's cookies. The access token comes back in the redirect fragment. A redirect to the login page means the cookie is dead. Riot rotates `ssid` on each login and the new one lasts about a day, so the bot saves it and logs in again every 6 hours.
+1. **Login:** for link logins, `POST auth.riotgames.com/token` with `grant_type=refresh_token` (or `authorization_code` at registration) and `client_id=riot-client`; `invalid_grant` means the login is dead. For cookie logins, `GET auth.riotgames.com/authorize?...` with the user's cookies, with the access token in the redirect fragment; a redirect to the login page means the cookie is dead.
 2. **Entitlements token**, **PUUID** from `/userinfo`, and **shard** from riot-geo.
 3. **Storefront:** `POST pd.{shard}.a.pvp.net/store/v3/storefront/{puuid}`. The client version comes from valorant-api.com, so it tracks game patches.
 4. **Item data:** names, pictures and rarity from [valorant-api.com](https://valorant-api.com), refreshed every 12h.
 5. **Scheduling:** reset times come from the `...RemainingDurationInSeconds` fields. Each user is checked 90 seconds after their next reset, with checks spaced 2 seconds apart so many users don't hit Riot's login at once.
 6. **Delivery:** a shop section counts as posted only after the last DM carrying it is delivered. If a DM fails partway, only the undelivered sections are retried. If a user's DMs are closed, that rotation is skipped instead of retried every hour.
 
-The bot sends each user's cookies only to Riot. The aiohttp client has no cookie jar, so cookies can't leak between users.
+The bot sends each user's refresh token or cookies only to Riot. The aiohttp client has no cookie jar, so cookies can't leak between users.
 
 ## Privacy and security
 
-- `users.json`, which sits beside `bot.py`, holds every registered user's Riot cookies. **Those are full account access.** The file is written with mode 600 by a temp-file plus `os.replace`, and it's gitignored.
-- The cookie travels from Discord's pop-up to the bot, so Discord sees it in transit. Only register on a bot whose host you trust.
-- A cookie is invalidated by a password change, "sign out of all devices", 2FA changes, or Riot flagging the session. **Changing your Riot password is the kill switch.**
+- `users.json`, which sits beside `bot.py`, holds every registered user's Riot refresh token (or cookies, for cookie logins). **Those are full account access.** The file is written with mode 600 by a temp-file plus `os.replace`, and it's gitignored.
+- The pasted address (or cookie) travels from Discord's pop-up to the bot, so Discord sees it in transit. Only register on a bot whose host you trust.
+- A login is invalidated by a password change, "sign out of all devices", 2FA changes, or Riot flagging the session. **Changing your Riot password is the kill switch.**
 - Set `ALLOWED_USERS` to limit who can register.
 - Read-only store checks aren't known to cause bans, but this is a ToS gray area with no guarantees.
 

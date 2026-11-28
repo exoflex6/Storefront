@@ -1,4 +1,11 @@
-"""Riot's unofficial client API: cookie re-auth, entitlements, shard and storefront.
+"""Riot's unofficial client API: link login, re-auth, entitlements, shard and storefront.
+
+Two kinds of stored credential, both called `auth`:
+- `{"refresh_token": ...}` from the link login. The user signs in on Riot's page as the
+  Riot Client (client_id riot-client, response_type=code, scope offline_access), pastes
+  the localhost URL it lands on, and the code in it is traded for a refresh token.
+  Renewing is a refresh_token grant, so it doesn't depend on any browser session.
+- `{"ssid": ..., ...}` cookies from the older copy-the-cookie registration.
 
 None of this is Riot's official developer API. It can break after a patch; the
 client version is fetched from valorant-api.com so it tracks game updates.
@@ -12,9 +19,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import secrets
 import time
 from dataclasses import dataclass, field
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 import aiohttp
 
@@ -28,6 +36,37 @@ REAUTH_URL = (
     "&nonce=1"
     "&scope=account%20openid"
 )
+
+TOKEN_URL = "https://auth.riotgames.com/token"
+LOGIN_CLIENT_ID = "riot-client"
+LOGIN_REDIRECT = "http://localhost/redirect"
+
+
+def login_url() -> str:
+    """Riot's sign-in page as the Riot Client. It ends on localhost/redirect?code=..., which
+    shows a browser error page (nothing listens there); the user pastes that address back."""
+    return "https://auth.riotgames.com/authorize?" + urlencode({
+        "client_id": LOGIN_CLIENT_ID,
+        "redirect_uri": LOGIN_REDIRECT,
+        "response_type": "code",
+        "scope": "openid link ban lol_region account offline_access",
+        "nonce": secrets.token_urlsafe(16),
+    })
+
+
+def parse_code_input(text: str) -> str | None:
+    """The authorization code from the pasted redirect URL (or a bare code)."""
+    text = text.strip().strip('"<>').strip()
+    if not text:
+        return None
+    if "code=" in text:
+        query = urlsplit(text if "://" in text else "http://x/?" + text.split("?", 1)[-1]).query
+        code = parse_qs(query).get("code", [None])[0]
+        return code.strip() if code else None
+    if "/" in text or " " in text or "#" in text:
+        return None
+    return text
+
 
 # The RiotClient/... user agent started triggering hCaptcha; this one doesn't.
 AUTH_USER_AGENT = "ShooterGame/13 Windows/10.0.19043.1.256.64bit"
@@ -129,7 +168,8 @@ class Session:
     puuid: str
     name: str | None
     shard: str
-    cookies: dict[str, str] = field(repr=False, default_factory=dict)
+    # The credential to store after this login (rotated cookies or the latest refresh token).
+    auth: dict[str, str] = field(repr=False, default_factory=dict)
 
 
 class RiotAPI:
@@ -153,8 +193,51 @@ class RiotAPI:
         self._version = (data["riotClientVersion"], time.time())
         return self._version[0]
 
-    async def login(self, cookies: dict[str, str]) -> Session:
-        """Full re-auth with a user's cookies. Raises AuthError(dead=True) if they're invalid."""
+    async def login(self, auth: dict[str, str]) -> Session:
+        """Log in with a stored credential (or a fresh link-login code).
+
+        Raises AuthError(dead=True) when the credential is no longer valid.
+        """
+        if auth.get("code"):
+            return await self._token_grant({"grant_type": "authorization_code", "code": auth["code"],
+                                            "redirect_uri": LOGIN_REDIRECT}, what="login link")
+        if auth.get("refresh_token"):
+            return await self._token_grant({"grant_type": "refresh_token", "refresh_token": auth["refresh_token"]},
+                                           what="refresh token")
+        return await self._cookie_login(auth)
+
+    async def _token_grant(self, form: dict[str, str], *, what: str) -> Session:
+        async with self.http.post(
+            TOKEN_URL,
+            data={**form, "client_id": LOGIN_CLIENT_ID},
+            headers={"User-Agent": AUTH_USER_AGENT},
+            timeout=TIMEOUT,
+        ) as res:
+            status = res.status
+            text = await res.text()
+        try:
+            body = json.loads(text)
+        except ValueError:
+            body = {}
+        if status == 429:
+            raise AuthError("Riot login is rate limiting this server (429)")
+        error = body.get("error") if isinstance(body, dict) else None
+        if status in (400, 401) and error:
+            raise AuthError(f"{what} rejected by Riot ({error})", dead=True)
+        if status != 200 or not body.get("access_token"):
+            raise AuthError(f"unexpected Riot token status {status}")
+        tokens = {
+            "access_token": body["access_token"],
+            "id_token": body.get("id_token"),
+            "expires_at": time.time() + int(body.get("expires_in") or 3600),
+        }
+        # Riot may rotate the refresh token; keep the old one if it didn't send a new one.
+        refresh = body.get("refresh_token") or form.get("refresh_token")
+        if not refresh:
+            raise AuthError("Riot didn't return a refresh token for this login")
+        return await self._session(tokens, {"refresh_token": refresh})
+
+    async def _cookie_login(self, cookies: dict[str, str]) -> Session:
         if not cookies.get("ssid"):
             raise AuthError("no ssid cookie", dead=True)
 
@@ -181,7 +264,9 @@ class RiotAPI:
         tokens = parse_reauth_location(location)
         if not tokens:
             raise AuthError("cookie rejected - Riot asked to log in again", dead=True)
+        return await self._session(tokens, merge_set_cookies(cookies, set_cookie))
 
+    async def _session(self, tokens: dict, auth: dict[str, str]) -> Session:
         bearer = {"Authorization": f"Bearer {tokens['access_token']}"}
         entitlements, user = await asyncio.gather(
             self._json("POST", "https://entitlements.auth.riotgames.com/api/token/v1", bearer, {}),
@@ -200,7 +285,7 @@ class RiotAPI:
             puuid=user["sub"],
             name=f"{acct['game_name']}#{acct['tag_line']}" if acct.get("game_name") else None,
             shard=region_to_shard(geo["affinities"]["live"]),
-            cookies=merge_set_cookies(cookies, set_cookie),
+            auth=auth,
         )
 
     async def _json(self, method: str, url: str, headers: dict, body: dict | None = None) -> dict:
@@ -230,16 +315,16 @@ class RiotAPI:
 
 
 class RiotAccount:
-    """One registered user's Riot login. Re-auths with their cookies when needed.
+    """One registered user's Riot login. Logs in again with their stored credential when needed.
 
-    `on_cookies` is called with the rotated cookies after every login so they can be saved:
-    the old ssid may stop working once Riot has issued a new one.
+    `on_auth` is called with the credential after every login so it can be saved: Riot
+    rotates the ssid cookie, and may rotate refresh tokens.
     """
 
-    def __init__(self, api: RiotAPI, cookies: dict[str, str], on_cookies):
+    def __init__(self, api: RiotAPI, auth: dict[str, str], on_auth):
         self.api = api
-        self.cookies = cookies
-        self.on_cookies = on_cookies
+        self.auth_data = auth
+        self.on_auth = on_auth
         self.session: Session | None = None
         self._lock = asyncio.Lock()
 
@@ -248,9 +333,9 @@ class RiotAccount:
             if not force and self.session and self.session.expires_at - TOKEN_MARGIN > time.time():
                 return self.session
             self.session = None
-            session = await self.api.login(self.cookies)
-            self.cookies = session.cookies
-            self.on_cookies(session.cookies)
+            session = await self.api.login(self.auth_data)
+            self.auth_data = session.auth
+            self.on_auth(session.auth)
             self.session = session
             return session
 

@@ -4,7 +4,8 @@ import unittest
 import unittest.mock
 
 from embeds import Emojis, Group, alert_groups, paginate, section_embeds, wishlist_item_embeds
-from riot import CLIENT_PLATFORM, merge_set_cookies, parse_cookie_input, parse_reauth_location, region_to_shard
+from riot import (CLIENT_PLATFORM, AuthError, RiotAPI, login_url, merge_set_cookies, parse_code_input,
+                  parse_cookie_input, parse_reauth_location, region_to_shard)
 from shop import SECTIONS, next_reset, parse_storefront, rotation_key, wishlist_hits
 import tempfile
 from pathlib import Path
@@ -31,6 +32,20 @@ class RiotParsing(unittest.TestCase):
         self.assertIsNone(parse_reauth_location("https://authenticate.riotgames.com/login?x=1"))
         self.assertIsNone(parse_reauth_location(None))
 
+    def test_login_link(self):
+        url = login_url()
+        self.assertIn("client_id=riot-client", url)
+        self.assertIn("response_type=code", url)
+        self.assertIn("offline_access", url)
+        self.assertNotEqual(url, login_url())  # fresh nonce
+
+    def test_code_input_forms(self):
+        self.assertEqual(parse_code_input("http://localhost/redirect?code=ABC.123&iss=x&state=y"), "ABC.123")
+        self.assertEqual(parse_code_input("  localhost/redirect?code=ABC  "), "ABC")
+        self.assertEqual(parse_code_input("ABC.123"), "ABC.123")
+        self.assertIsNone(parse_code_input("http://localhost/redirect?error=access_denied"))
+        self.assertIsNone(parse_code_input(""))
+
     def test_shards(self):
         self.assertEqual(region_to_shard("latam"), "na")
         self.assertEqual(region_to_shard("br"), "na")
@@ -39,6 +54,68 @@ class RiotParsing(unittest.TestCase):
     def test_client_platform_blob(self):
         decoded = json.loads(base64.b64decode(CLIENT_PLATFORM))
         self.assertEqual(decoded["platformType"], "PC")
+
+
+class _Resp:
+    def __init__(self, status, body):
+        self.status, self._body, self.headers = status, body, {}
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def text(self):
+        return json.dumps(self._body)
+
+    async def json(self, content_type=None):
+        return self._body
+
+
+class _HTTP:
+    """Just enough aiohttp for RiotAPI's token login."""
+
+    def __init__(self, token_status, token_body):
+        self.token = (token_status, token_body)
+        self.posted = []
+
+    def post(self, url, data=None, **kw):
+        self.posted.append((url, data))
+        return _Resp(*self.token)
+
+    def request(self, method, url, **kw):
+        if "entitlements" in url:
+            return _Resp(200, {"entitlements_token": "ENT"})
+        if "userinfo" in url:
+            return _Resp(200, {"sub": "PUUID", "acct": {"game_name": "Me", "tag_line": "NA1"}})
+        return _Resp(200, {"affinities": {"live": "latam"}})
+
+
+class TokenLogin(unittest.IsolatedAsyncioTestCase):
+    async def test_code_is_traded_for_a_refresh_token(self):
+        http = _HTTP(200, {"access_token": "AT", "id_token": "IT", "refresh_token": "RT", "expires_in": 3600})
+        session = await RiotAPI(http).login({"code": "C"})
+        url, form = http.posted[0]
+        self.assertEqual(url, "https://auth.riotgames.com/token")
+        self.assertEqual(form, {"grant_type": "authorization_code", "code": "C",
+                                "redirect_uri": "http://localhost/redirect", "client_id": "riot-client"})
+        self.assertEqual(session.auth, {"refresh_token": "RT"})
+        self.assertEqual((session.puuid, session.name, session.shard), ("PUUID", "Me#NA1", "na"))
+
+    async def test_refresh_keeps_old_token_unless_rotated(self):
+        http = _HTTP(200, {"access_token": "AT", "id_token": "IT"})
+        session = await RiotAPI(http).login({"refresh_token": "RT"})
+        self.assertEqual(http.posted[0][1]["grant_type"], "refresh_token")
+        self.assertEqual(session.auth, {"refresh_token": "RT"})
+
+    async def test_rejected_grant_is_dead_and_rate_limit_is_not(self):
+        with self.assertRaises(AuthError) as ctx:
+            await RiotAPI(_HTTP(401, {"error": "invalid_grant"})).login({"refresh_token": "RT"})
+        self.assertTrue(ctx.exception.dead)
+        with self.assertRaises(AuthError) as ctx:
+            await RiotAPI(_HTTP(429, {})).login({"refresh_token": "RT"})
+        self.assertFalse(ctx.exception.dead)
 
 
 class Parsing(unittest.TestCase):

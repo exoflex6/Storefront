@@ -27,11 +27,12 @@ MAX_DELAY = 24 * 60 * 60
 # Space out scheduled checks so many users resetting at once don't hammer Riot's login.
 CHECK_SPACING = 2
 TICK = 30
-# The ssid Riot hands back on each login stops working about 24h later (a login 24h00m18s
-# after the previous one was rejected; 23h59m49s was fine). Log in again well inside that.
+# The ssid Riot hands back on each cookie login stops working about 24h later (a login
+# 24h00m18s after the previous one was rejected; 23h59m49s was fine). Log in again well
+# inside that. Link logins renew with a refresh token; refreshing them too keeps it in use.
 KEEPALIVE = 6 * 60 * 60
 
-REFRESH_HINT = "Run `/register` to add a fresh cookie."
+REFRESH_HINT = "Run `/register` to log in again."
 
 Notify = Callable[[int, dict], Awaitable[None]]
 
@@ -65,27 +66,27 @@ class ShopService:
         if uid not in self.accounts:
             user = self.users.get(uid)
 
-            def save_cookies(cookies: dict[str, str], uid=uid) -> None:
+            def save_auth(auth: dict[str, str], uid=uid) -> None:
                 # The user may have unregistered while a login was in flight.
                 current = self.users.get(uid)
                 if current is not None:
-                    current["cookies"] = cookies
+                    current["auth"] = auth
                     current["last_login"] = int(time.time())
                     self.users.save()
 
-            self.accounts[uid] = RiotAccount(self.api, dict(user["cookies"]), save_cookies)
+            self.accounts[uid] = RiotAccount(self.api, dict(user["auth"]), save_auth)
         return self.accounts[uid]
 
-    async def register(self, user_id: int | str, cookies: dict[str, str]) -> tuple[dict, Shop | None]:
-        """Validate the cookies with Riot and store the user. Keeps an existing wishlist and settings.
+    async def register(self, user_id: int | str, auth: dict[str, str]) -> tuple[dict, Shop | None]:
+        """Log in with `auth` ({"code": ...} from the link, or cookies) and store the user. Keeps an existing wishlist and settings.
 
         Baselines the current rotation so registering doesn't trigger a burst of DMs; the
         first automatic post comes at the next reset.
         """
         uid = str(user_id)
-        session = await self.api.login(cookies)
+        session = await self.api.login(auth)
         previous = self.users.get(uid)
-        user = new_user(session.cookies)
+        user = new_user(session.auth)
         if previous:
             user.update(wishlist=previous["wishlist"], auto_post=previous["auto_post"], registered_at=previous["registered_at"])
         user.update(riot_name=session.name, puuid=session.puuid, shard=session.shard, last_login=int(time.time()))
@@ -148,7 +149,7 @@ class ShopService:
         user = self.users.get(uid)
         if not user or user["auth_dead"]:
             return
-        log.warning("user %s: cookie dead: %s", uid, err)
+        log.warning("user %s: login dead: %s", uid, err)
         user["auth_dead"] = True
         self.users.save()
         self.accounts.pop(uid, None)
@@ -214,7 +215,7 @@ class ShopService:
             mark(name for name in changed if last_message.get(name) == i)
 
     async def keep_alive(self, user_id: int | str) -> None:
-        """Log in again so Riot issues a fresh ssid before the current one expires."""
+        """Log in again so the stored credential stays fresh (a new ssid or refresh token)."""
         uid = str(user_id)
         try:
             await self.account(uid).auth(force=True)

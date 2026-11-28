@@ -1,7 +1,8 @@
 """Storefront - check your Valorant shop from Discord.
 
-Anyone can register their own Riot account with /register (they paste their
-ssid cookie into a private pop-up). Every other command asks unregistered users
+Anyone can register their own Riot account with /register: they sign in on
+Riot's page and paste back the address it lands on (or, as a fallback, their
+ssid cookie). Every other command asks unregistered users
 to do that first. Each user then gets their own /shop, wishlist and DMs when
 their shop resets.
 """
@@ -21,7 +22,7 @@ from dotenv import load_dotenv
 
 from catalog import KIND_LABEL, Catalog
 from embeds import Emojis, Group, paginate, relative, section_embeds, wishlist_item_embeds
-from riot import REAUTH_URL, AuthError, RiotAPI, parse_cookie_input
+from riot import REAUTH_URL, AuthError, RiotAPI, login_url, parse_code_input, parse_cookie_input
 from service import ShopService, describe_error
 from shop import SECTION_LABEL, SECTIONS
 from users import UserStore
@@ -40,16 +41,28 @@ ROTATION_FILE = USERS_FILE.with_name("rotation.json")
 # Optional comma-separated Discord user IDs allowed to register. Empty: anyone.
 ALLOWED_USERS = {u.strip() for u in os.getenv("ALLOWED_USERS", "").split(",") if u.strip()}
 
-REGISTER_TEXT = f"""\
-**Add your Riot account**
+LOGIN_STEPS = """\
+**Step 1:** Press **Click here to log in** below and sign in to Riot. Tick **Stay signed in**.
+
+**Step 2:** After you sign in, your browser shows an error page (*localhost refused to connect* or similar). **That's normal!**
+
+**Step 3:** Copy the whole address from the address bar (it starts with `http://localhost/redirect?code=`), press **I've logged in - paste URL** and paste it. Do it within a minute or so: the code in it expires quickly.
+
+-# The bot keeps a Riot login token on its server and uses it only to read your shop. Changing your Riot password cancels it, and `/unregister` deletes it."""
+
+COOKIE_TEXT = f"""\
+**Add your Riot account with a cookie** (only if the login link doesn't work for you)
 1. In a desktop browser, open a **private/incognito window**, go to [this Riot sign-in page]({REAUTH_URL}) and sign in with **Stay signed in** ticked. You'll end up on playvalorant.com.
 2. Press **F12** → **Application** (Chrome/Edge) or **Storage** (Firefox) → **Cookies** → `https://auth.riotgames.com`.
 3. Copy the value of the `ssid` cookie.
 4. Press **Add my cookie** below and paste it, then **close the private window without signing out**. Signing out of that session would log the bot out too.
 
-⚠️ That cookie is full access to your Riot account, so only give it to a bot you trust. \
-It's kept on the bot's server and used only to read your shop. \
-Changing your Riot password cancels it, and `/unregister` deletes it."""
+⚠️ That cookie is full access to your Riot account, so only give it to a bot you trust."""
+
+
+def login_embed() -> discord.Embed:
+    return discord.Embed(title="🔐 Log in to your Riot account", description=LOGIN_STEPS, color=0xFF4655)
+
 
 NOT_REGISTERED = "You need to add your Riot account before you can use that. It takes about a minute:"
 
@@ -122,6 +135,49 @@ bot = Bot()
 
 # --- registration -------------------------------------------------------------
 
+async def finish_registration(interaction: discord.Interaction, auth: dict[str, str], rejected: str) -> None:
+    """Log in with `auth`, store the user, and report back (after the modal deferred)."""
+    try:
+        user, shop = await bot.service.register(interaction.user.id, auth)
+    except AuthError as exc:
+        await interaction.followup.send(rejected if exc.dead else describe_error(exc), ephemeral=True)
+        return
+    except Exception as exc:
+        log.exception("registration failed for user %s", interaction.user.id)
+        await interaction.followup.send(describe_error(exc, "log you in"), ephemeral=True)
+        return
+    on = ", ".join(SECTION_LABEL[s].lower() for s in SECTIONS if user["auto_post"][s]) or "nothing"
+    lines = [
+        f"✅ Registered{' as **' + user['riot_name'] + '**' if user['riot_name'] else ''}.",
+        "Try `/shop`, `/accessories`, `/nightmarket`, `/bundle` or `/store`.",
+        f"I'll DM you when your shop resets ({on}; change with `/autopost`) and when something on your `/wishlist` shows up.",
+    ]
+    if shop is None:
+        lines.append("I couldn't load your shop just now; I'll keep trying.")
+    await interaction.followup.send("\n".join(lines), ephemeral=True)
+
+
+class LoginURLModal(discord.ui.Modal, title="Paste the address from your browser"):
+    url = discord.ui.TextInput(
+        label="Address after logging in",
+        style=discord.TextStyle.paragraph,
+        placeholder="http://localhost/redirect?code=...",
+        max_length=4000,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        code = parse_code_input(self.url.value)
+        if not code:
+            await interaction.followup.send(
+                "That address doesn't have a login code in it. After signing in, copy the whole address "
+                "starting with `http://localhost/redirect?code=` and run `/register` again.", ephemeral=True)
+            return
+        await finish_registration(interaction, {"code": code}, (
+            "Riot didn't accept that login. Codes only work once and expire within about a minute, "
+            "so run `/register`, sign in again and paste the new address straight away."))
+
+
 class CookieModal(discord.ui.Modal, title="Add your Riot account"):
     cookie = discord.ui.TextInput(
         label="Your ssid cookie",
@@ -136,36 +192,38 @@ class CookieModal(discord.ui.Modal, title="Add your Riot account"):
         if not cookies.get("ssid"):
             await interaction.followup.send("That doesn't look like an `ssid` cookie. Copy the value of `ssid` and try `/register` again.", ephemeral=True)
             return
-        try:
-            user, shop = await bot.service.register(interaction.user.id, cookies)
-        except AuthError as exc:
-            if exc.dead:
-                msg = ("Riot didn't accept that cookie. Sign in again with **Stay signed in** ticked, "
-                       "copy a fresh `ssid` and run `/register` again.")
-            else:
-                msg = describe_error(exc)
-            await interaction.followup.send(msg, ephemeral=True)
-            return
-        on = ", ".join(SECTION_LABEL[s].lower() for s in SECTIONS if user["auto_post"][s]) or "nothing"
-        lines = [
-            f"✅ Registered{' as **' + user['riot_name'] + '**' if user['riot_name'] else ''}.",
-            "Try `/shop`, `/accessories`, `/nightmarket`, `/bundle` or `/store`.",
-            f"I'll DM you when your shop resets ({on}; change with `/autopost`) and when something on your `/wishlist` shows up.",
-        ]
-        if shop is None:
-            lines.append("I couldn't load your shop just now; I'll keep trying.")
-        await interaction.followup.send("\n".join(lines), ephemeral=True)
+        await finish_registration(interaction, cookies, (
+            "Riot didn't accept that cookie. Sign in again with **Stay signed in** ticked, "
+            "copy a fresh `ssid` and run `/register` again."))
 
 
 class RegisterView(discord.ui.View):
     def __init__(self) -> None:
         super().__init__(timeout=15 * 60)
+        # A fresh nonce per message; the link itself is safe to show (it's Riot's own page).
+        self.add_item(discord.ui.Button(label="Click here to log in", emoji="🔗", url=login_url(), row=0))
 
-    @discord.ui.button(label="Add my cookie", style=discord.ButtonStyle.primary, emoji="🔑")
-    async def add(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
+    @discord.ui.button(label="I've logged in - paste URL", style=discord.ButtonStyle.primary, emoji="📋", row=1)
+    async def paste(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
         if not allowed(interaction.user.id):
             await interaction.response.send_message("This bot is invite-only.", ephemeral=True)
             return
+        await interaction.response.send_modal(LoginURLModal())
+
+    @discord.ui.button(label="Use a cookie instead", style=discord.ButtonStyle.secondary, row=1)
+    async def cookie(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
+        if not allowed(interaction.user.id):
+            await interaction.response.send_message("This bot is invite-only.", ephemeral=True)
+            return
+        await interaction.response.send_message(COOKIE_TEXT, view=CookieView(), ephemeral=True, suppress_embeds=True)
+
+
+class CookieView(discord.ui.View):
+    def __init__(self) -> None:
+        super().__init__(timeout=15 * 60)
+
+    @discord.ui.button(label="Add my cookie", style=discord.ButtonStyle.primary, emoji="🔑")
+    async def add(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
         await interaction.response.send_modal(CookieModal())
 
 
@@ -177,7 +235,7 @@ async def require_user(interaction: discord.Interaction) -> dict | None:
     """The caller's account, or None after asking them to register first."""
     user = bot.store.get(interaction.user.id)
     if user is None:
-        await interaction.response.send_message(f"{NOT_REGISTERED}\n\n{REGISTER_TEXT}", view=RegisterView(), ephemeral=True, suppress_embeds=True)
+        await interaction.response.send_message(NOT_REGISTERED, embed=login_embed(), view=RegisterView(), ephemeral=True)
     return user
 
 
@@ -188,8 +246,8 @@ async def register(interaction: discord.Interaction) -> None:
         return
     prefix = ""
     if bot.store.get(interaction.user.id):
-        prefix = "You're already registered. Adding a new cookie replaces the old one and keeps your wishlist.\n\n"
-    await interaction.response.send_message(prefix + REGISTER_TEXT, view=RegisterView(), ephemeral=True, suppress_embeds=True)
+        prefix = "You're already registered. Logging in again replaces your old login and keeps your wishlist."
+    await interaction.response.send_message(prefix or None, embed=login_embed(), view=RegisterView(), ephemeral=True)
 
 
 class ConfirmUnregister(discord.ui.View):
@@ -199,19 +257,19 @@ class ConfirmUnregister(discord.ui.View):
     @discord.ui.button(label="Delete my data", style=discord.ButtonStyle.danger)
     async def confirm(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
         bot.service.unregister(interaction.user.id)
-        await interaction.response.edit_message(content="Done. Your cookie, wishlist and settings are deleted.", view=None)
+        await interaction.response.edit_message(content="Done. Your Riot login, wishlist and settings are deleted.", view=None)
 
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
         await interaction.response.edit_message(content="Kept your account.", view=None)
 
 
-@bot.tree.command(name="unregister", description="Delete your Riot cookie, wishlist and settings from the bot")
+@bot.tree.command(name="unregister", description="Delete your Riot login, wishlist and settings from the bot")
 async def unregister(interaction: discord.Interaction) -> None:
     if await require_user(interaction) is None:
         return
     await interaction.response.send_message(
-        "This deletes your stored Riot cookie, wishlist and settings. Sure?", view=ConfirmUnregister(), ephemeral=True,
+        "This deletes your stored Riot login, wishlist and settings. Sure?", view=ConfirmUnregister(), ephemeral=True,
     )
 
 

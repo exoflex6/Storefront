@@ -1,7 +1,8 @@
 """Registered users, one JSON file beside the code.
 
-The file holds every registered user's Riot cookies, which are full account
-access, so it is written with mode 600 (temp file + os.replace, so a crash
+The file holds every registered user's Riot credential (a refresh token, or
+cookies for older registrations), which is full account access, so it is
+written with mode 600 (temp file + os.replace, so a crash
 mid-write never leaves a half-written file) and is gitignored.
 """
 
@@ -24,9 +25,10 @@ def default_auto_post() -> dict[str, bool]:
     return {"daily": True, "accessories": True, "night_market": False, "bundles": False}
 
 
-def new_user(cookies: dict[str, str]) -> dict:
+def new_user(auth: dict[str, str]) -> dict:
     return {
-        "cookies": cookies,
+        # {"refresh_token": ...} from the link login, or cookies from the older cookie login.
+        "auth": auth,
         "riot_name": None,
         "puuid": None,
         "shard": None,
@@ -35,10 +37,10 @@ def new_user(cookies: dict[str, str]) -> dict:
         # Last rotation posted per section, so restarts don't re-send the same DM.
         "last_posted": {name: None for name in SECTIONS},
         "auto_post": default_auto_post(),
-        # Set once we've told the user their cookie died; cleared when they re-register.
+        # Set once we've told the user their login died; cleared when they re-register.
         "auth_dead": False,
-        # Last successful Riot login. Riot's rotated ssid lasts about 24h, so the scheduler
-        # logs in again well before that (see service.KEEPALIVE).
+        # Last successful Riot login. A cookie login's rotated ssid lasts about 24h, so the
+        # scheduler logs in again well before that (see service.KEEPALIVE).
         "last_login": None,
     }
 
@@ -51,6 +53,8 @@ class UserStore:
             with path.open(encoding="utf-8") as handle:
                 self.users = json.load(handle)
             for user in self.users.values():
+                if "auth" not in user:
+                    user["auth"] = user.pop("cookies", {})
                 user.setdefault("wishlist", [])
                 user["last_posted"] = {**{n: None for n in SECTIONS}, **(user.get("last_posted") or {})}
                 user["auto_post"] = {**default_auto_post(), **(user.get("auto_post") or {})}
